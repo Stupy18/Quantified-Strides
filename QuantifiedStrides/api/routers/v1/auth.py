@@ -29,16 +29,17 @@ async def register(body: RegisterSchema, db: AsyncSession = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# commented out for my sanity
     # Send verification email in background (non-blocking)
-    asyncio.get_event_loop().run_in_executor(
-        None,
-        send_verification_email,
-        user["email"],
-        user["name"],
-        user["verification_token"],
-    )
-
-    return {"message": "Account created. Check your email to verify your account."}
+    # asyncio.get_event_loop().run_in_executor(
+    #     None,
+    #     send_verification_email,
+    #     user["email"],
+    #     user["name"],
+    #     user["verification_token"],
+    # )
+    #
+    # return {"message": "Account created. Check your email to verify your account."}
 
 
 @router.post("/login", response_model=TokenSchema)
