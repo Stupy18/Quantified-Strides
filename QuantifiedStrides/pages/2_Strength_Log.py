@@ -6,9 +6,9 @@ Replaces the CLI strength_log.py with a Streamlit form.
 import streamlit as st
 from datetime import date
 
-from db import get_connection
-from session import current_user_id
-from options import (
+from db.db import get_connection
+from db.session import current_user_id
+from core.options import (
     get_muscles, get_equipment, get_joints, get_sport_carryover_keys,
     get_movement_patterns, get_quality_focuses, get_contraction_types,
     get_skill_levels,

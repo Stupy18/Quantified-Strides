@@ -8,13 +8,12 @@ Usage:
 
 import argparse
 import json
-import sys
 import time
 
 import anthropic
 
 from config import ANTHROPIC_API_KEY
-from db import get_connection
+from db.db import get_connection
 
 
 MUSCLE_VOCABULARY = [

@@ -13,7 +13,7 @@ DashboardService itself contains NO intelligence logic — only orchestration.
 """
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date
 
 from api.schemas.dashboard import (
     DashboardSchema,
@@ -28,8 +28,8 @@ from api.services.alerts import AlertsService
 from api.services.recommendation import RecommendationService
 from api.services.narrative import generate_narrative
 
-from db import get_connection
-from recommend import get_last_nights_sleep, get_latest_weather, get_recent_load, get_recent_load_by_sport
+from db.db import get_connection
+from core.recommend import get_last_nights_sleep, get_latest_weather, get_recent_load_by_sport
 
 
 class DashboardService:

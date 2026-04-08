@@ -13,10 +13,10 @@ import argparse
 import sys
 from datetime import date, datetime, timedelta
 
-from db import get_connection
-from training_load import get_metrics, tsb_intensity_hint
-from recovery import get_hrv_status, get_muscle_freshness
-from alerts import get_alerts, interpret_metrics
+from db.db import get_connection
+from core.training_load import get_metrics, tsb_intensity_hint
+from core.recovery import get_hrv_status, get_muscle_freshness
+from core.alerts import get_alerts, interpret_metrics
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from db import get_connection
+from db.db import get_connection
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import hashlib
 import logging
 import sys
 import config
-from workout_data_archiver import WorkoutArchiver
+from ingestion.workout_data_archiver import WorkoutArchiver
 
 logging.basicConfig(level=logging.INFO, format=config.LOG_FORMAT)
 logger = logging.getLogger("workout_v2")

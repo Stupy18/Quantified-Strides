@@ -17,8 +17,8 @@ from datetime import date
 
 from api.schemas.dashboard import ExerciseSuggestionSchema, GymRecSchema, RecommendationSchema
 
-from db import get_connection
-from recommend import (
+from db.db import get_connection
+from core.recommend import (
     get_readiness,
     get_yesterdays_training,
     get_last_nights_sleep,

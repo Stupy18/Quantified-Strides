@@ -5,10 +5,10 @@ post-workout reflections, and journal notes, with trend charts.
 
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import date, timedelta
+from datetime import date
 
-from db import get_connection
-from session import current_user_id
+from db.db import get_connection
+from db.session import current_user_id
 
 st.set_page_config(page_title="Journal", page_icon="📓", layout="wide")
 st.title("📓 Journal")
@@ -299,7 +299,6 @@ with tab_trends:
             ))
             # 7-day rolling avg for overall
             if len(overall) >= 7:
-                from datetime import timedelta
                 rolling, rdates = [], []
                 for i, (d, v) in enumerate(zip(dates, overall)):
                     window = [overall[j] for j in range(max(0, i - 6), i + 1)]

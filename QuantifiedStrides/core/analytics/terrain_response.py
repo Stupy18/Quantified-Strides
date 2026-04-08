@@ -26,8 +26,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from db import get_connection
-from analytics.running_economy import gap_multiplier
+from db.db import get_connection
+from core.analytics.running_economy import gap_multiplier
 
 
 # ---------------------------------------------------------------------------

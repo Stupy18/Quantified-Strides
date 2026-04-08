@@ -5,10 +5,9 @@ Sleep History — browse past sleep sessions and view per-night detail.
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, timedelta
 
-from db import get_connection
-from session import current_user_id
+from db.db import get_connection
+from db.session import current_user_id
 
 st.set_page_config(page_title="Sleep History", page_icon="🌙", layout="wide")
 st.title("🌙 Sleep History")

@@ -12,7 +12,7 @@ fallback so the UI never breaks with an empty list.
 """
 
 import streamlit as st
-from db import get_connection
+from db.db import get_connection
 
 
 # ---------------------------------------------------------------------------

@@ -21,8 +21,8 @@ from api.schemas.training import (
     WorkoutMetricPointSchema,
 )
 
-from db import get_connection
-from training_load import get_history, get_hrv_history
+from db.db import get_connection
+from core.training_load import get_history, get_hrv_history
 
 
 class TrainingService:

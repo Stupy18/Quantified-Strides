@@ -11,15 +11,15 @@ from datetime import date, timedelta
 
 import plotly.graph_objects as go
 
-from db import get_connection
-from recommend import (
+from db.db import get_connection
+from core.recommend import (
     get_readiness, get_yesterdays_training, get_last_nights_sleep,
     get_latest_weather, get_recent_load, get_consecutive_training_days,
     get_gym_analysis, get_exercise_suggestions, build_recommendation,
 )
-from training_load import get_metrics, tsb_intensity_hint
-from recovery import get_hrv_status, get_muscle_freshness
-from alerts import get_alerts, interpret_metrics
+from core.training_load import get_metrics
+from core.recovery import get_hrv_status, get_muscle_freshness
+from core.alerts import get_alerts, interpret_metrics
 
 st.set_page_config(
     page_title="QuantifiedStrides",

@@ -3,7 +3,7 @@ from datetime import datetime
 import requests
 
 from config import OPENWEATHER_API_KEY
-from db import get_connection
+from db.db import get_connection
 
 conn = get_connection()
 cursor = conn.cursor()

@@ -6,9 +6,9 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import date, timedelta
 
-from db import get_connection
-from training_load import get_history, get_hrv_history
-from session import current_user_id
+from db.db import get_connection
+from core.training_load import get_history, get_hrv_history
+from db.session import current_user_id
 
 st.set_page_config(page_title="Analytics", page_icon="📈", layout="wide")
 st.title("📈 Analytics")

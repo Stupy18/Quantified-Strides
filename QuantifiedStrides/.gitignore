@@ -5,4 +5,4 @@ __pycache__/
 *.pyc
 coverage/
 .idea/
-dump.sql
+db/dump.sql

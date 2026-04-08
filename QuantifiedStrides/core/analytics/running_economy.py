@@ -21,10 +21,9 @@ Three running economy metrics computed from workout_metrics time-series:
 
 from __future__ import annotations
 
-import math
 from typing import Optional
 
-from db import get_connection
+from db.db import get_connection
 
 
 # ---------------------------------------------------------------------------

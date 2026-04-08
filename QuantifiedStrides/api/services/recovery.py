@@ -12,8 +12,8 @@ from datetime import date
 
 from api.schemas.dashboard import HRVStatusSchema, MuscleFreshnessSchema
 
-from db import get_connection
-from recovery import get_hrv_status, get_muscle_freshness
+from db.db import get_connection
+from core.recovery import get_hrv_status, get_muscle_freshness
 
 
 class RecoveryService:

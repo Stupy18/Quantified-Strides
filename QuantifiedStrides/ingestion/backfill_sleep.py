@@ -4,12 +4,12 @@ One-time backfill: pull all Garmin sleep data from 2026-01-01 to today.
 Run once:  python3 backfill_sleep.py
 """
 
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 
 import garminconnect
 
 from config import GARMIN_EMAIL, GARMIN_PASSWORD
-from db import get_connection
+from db.db import get_connection
 
 client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
 client.login()

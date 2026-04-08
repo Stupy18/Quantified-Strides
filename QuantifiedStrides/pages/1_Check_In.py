@@ -5,8 +5,8 @@ Morning check-in + post-workout reflection page.
 import streamlit as st
 from datetime import date
 
-from db import get_connection
-from session import current_user_id
+from db.db import get_connection
+from db.session import current_user_id
 
 st.set_page_config(page_title="Check-In", page_icon="📋", layout="wide")
 st.title("📋 Check-In")

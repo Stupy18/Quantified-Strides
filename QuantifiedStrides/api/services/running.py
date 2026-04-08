@@ -11,7 +11,6 @@ asyncio.to_thread so they never block the async event loop.
 """
 
 import asyncio
-from typing import Literal
 
 from api.schemas.running import (
     BiomechanicsTrendPointSchema,
@@ -26,15 +25,13 @@ from api.schemas.running import (
     WorkoutGAPSchema,
 )
 
-from db import get_connection
-from analytics.running_economy import (
+from db.db import get_connection
+from core.analytics.running_economy import (
     get_running_trends,
     get_workout_gap,
-    get_aerobic_decoupling,
-    get_running_economy_index,
 )
-from analytics.biomechanics import get_biomechanics_trends, get_fatigue_signature
-from analytics.terrain_response import (
+from core.analytics.biomechanics import get_biomechanics_trends
+from core.analytics.terrain_response import (
     get_terrain_summary,
     get_elevation_hr_decoupling,
 )

@@ -19,7 +19,7 @@ import anthropic
 import requests
 
 from config import ANTHROPIC_API_KEY
-from db import get_connection
+from db.db import get_connection
 
 
 WGER_BASE = "https://wger.de/api/v2"

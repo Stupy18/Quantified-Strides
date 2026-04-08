@@ -4,13 +4,12 @@ Running Analytics — GAP, aerobic decoupling, biomechanics trends, terrain resp
 
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import date
 
-from db import get_connection
-from analytics.running_economy import get_running_trends
-from analytics.biomechanics import get_biomechanics_trends
-from analytics.terrain_response import get_terrain_summary
+from db.db import get_connection
+from core.analytics.running_economy import get_running_trends
+from core.analytics.biomechanics import get_biomechanics_trends
+from core.analytics.terrain_response import get_terrain_summary
 
 st.set_page_config(page_title="Running Analytics", page_icon="🏃", layout="wide")
 st.title("🏃 Running Analytics")

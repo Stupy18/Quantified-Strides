@@ -12,8 +12,8 @@ from datetime import date
 
 from api.schemas.dashboard import AlertSchema
 
-from db import get_connection
-from alerts import get_alerts
+from db.db import get_connection
+from core.alerts import get_alerts
 
 
 class AlertsService:

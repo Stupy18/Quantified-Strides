@@ -5,12 +5,11 @@ Workout History — browse past workouts and explore per-activity detail.
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, timedelta
 
-from db import get_connection
-from session import current_user_id
-from options import sport_icon, sport_display
-from analytics.running_economy import get_workout_gap, get_aerobic_decoupling
+from db.db import get_connection
+from db.session import current_user_id
+from core.options import sport_icon, sport_display
+from core.analytics.running_economy import get_workout_gap, get_aerobic_decoupling
 
 st.set_page_config(page_title="Workout History", page_icon="📋", layout="wide")
 st.title("📋 Workout History")

@@ -12,8 +12,8 @@ from datetime import date
 
 from api.schemas.dashboard import TrainingLoadSchema
 
-from db import get_connection
-from training_load import get_metrics, tsb_intensity_hint
+from db.db import get_connection
+from core.training_load import get_metrics, tsb_intensity_hint
 
 
 class TrainingLoadService:
