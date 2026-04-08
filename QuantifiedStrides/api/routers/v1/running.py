@@ -19,7 +19,7 @@ async def get_running_trends(
     days: int = Query(default=365, ge=30, le=730),
     user_id: int = Depends(get_current_user_id),
 ):
-    return await _svc.get_running_trends(days)
+    return await _svc.get_running_trends(days, user_id)
 
 
 @router.get("/biomechanics", response_model=list[BiomechanicsTrendPointSchema])
@@ -27,7 +27,7 @@ async def get_biomechanics_trends(
     days: int = Query(default=365, ge=30, le=730),
     user_id: int = Depends(get_current_user_id),
 ):
-    return await _svc.get_biomechanics_trends(days)
+    return await _svc.get_biomechanics_trends(days, user_id)
 
 
 @router.get("/terrain", response_model=TerrainSummarySchema)

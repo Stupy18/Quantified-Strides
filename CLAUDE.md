@@ -62,51 +62,91 @@ api/
   services/
     auth.py             # JWT issue/verify, password hash, email verification
     email.py            # SMTP email sending
-    dashboard.py        # assembles full dashboard payload
-    training_load.py    # TRIMP, ATL, CTL, TSB, ramp rate
-    recovery.py         # HRV trend z-score, muscle fatigue decay model
-    alerts.py           # anomaly detection, overtraining alerts
-    recommendation.py   # daily training recommendation engine
-    narrative.py        # Claude API call — narrative from detected patterns
-    rag.py              # pgvector similarity search for knowledge injection
+    dashboard.py        # orchestrates all services into one dashboard payload
     checkin.py          # readiness + reflection CRUD
     strength.py         # strength session/exercise/set CRUD + 1RM
     running.py          # running biomechanics computations
     sleep.py            # sleep history queries
     training.py         # workout history queries
+    adapters/           # thin async wrappers — bridge sync core/ to async API
+      training_load.py  # asyncio.to_thread wrapper around core.training_load
+      recovery.py       # asyncio.to_thread wrapper around core.recovery
+      alerts.py         # asyncio.to_thread wrapper around core.alerts
+      recommendation.py # asyncio.to_thread wrapper around core.recommend
+  ai/
+    narrative.py        # Claude API call — RAG-grounded narrative, cached per user/day
+    rag.py              # pgvector cosine similarity search for knowledge injection
   schemas/
     auth.py, checkin.py, dashboard.py, strength.py, training.py,
     sleep.py, running.py
 ```
 
-### Intelligence Layer — root-level modules
+### Intelligence Layer — `core/`
 
 ```
-training_load.py        # TRIMP, ATL/CTL/TSB, ramp rate, load history
-recovery.py             # HRV rolling z-score, muscle fatigue decay
-alerts.py               # anomaly detection, overtraining alerts, interpretations
-recommend.py            # daily training recommendation (integrates all signals)
-```
-
-### Analytics — `analytics/`
-
-```
-analytics/
-  biomechanics.py       # fatigue signature, cadence-speed relationship,
+core/
+  training_load.py      # TRIMP, ATL/CTL/TSB, ramp rate, load history
+  recovery.py           # HRV rolling z-score, muscle fatigue decay
+  alerts.py             # anomaly detection, overtraining alerts, interpretations
+  recommend.py          # daily training recommendation (integrates all signals)
+  analytics/
+    biomechanics.py     # fatigue signature, cadence-speed relationship,
                         # per-workout biomechanics summary, longitudinal trends
-  running_economy.py    # running economy analysis
-  terrain_response.py   # elevation vs HR response
+    running_economy.py  # running economy analysis
+    terrain_response.py # elevation vs HR response
 ```
 
-### Data Pipeline — root-level scripts
+### Data Ingestion — `ingestion/`
 
 ```
-workout.py              # Garmin → workouts table
-sleep.py                # Garmin → sleep_sessions table
-environment.py          # OpenWeatherMap + Ambee → environment_data table
-main.py                 # orchestrator (subprocess calls)
-checkin.py              # morning readiness + post-workout reflection
-strength_log.py         # gym session logger (Streamlit-era, superseded by API)
+ingestion/
+  workout.py            # Garmin → workouts table
+  sleep.py              # Garmin → sleep_sessions table
+  environment.py        # OpenWeatherMap + Ambee → environment_data table
+  workout_metrics.py    # Garmin → workout_metrics time-series table
+```
+
+### CLI Tools — `cli/`
+
+```
+cli/
+  checkin.py            # morning readiness + post-workout reflection (terminal)
+  daily_subjective.py   # daily subjective input CLI
+  strength_log.py       # gym session logger (superseded by API, kept for terminal use)
+```
+
+### Database — `db/`
+
+```
+db/
+  db.py                 # psycopg2 connection helper (used by ingestion + scripts)
+  schema.sql            # canonical PostgreSQL schema
+```
+
+### One-Off Scripts — `scripts/`
+
+```
+scripts/
+  check_connections.py       # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
+  backfill_workouts.py       # one-time: backfilled historical Garmin workouts
+  backfill_sleep.py          # one-time: backfilled historical sleep data
+  backfill_workout_metrics.py # one-time: backfilled workout_metrics time-series
+  ingest_knowledge.py        # one-time: embed coaching transcripts into pgvector
+  import_wger.py             # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
+  import_exercises.py        # one-time: imported 36 custom exercises
+  migrate_cascade.py         # schema migration helper
+  populate_tables.py         # seed script for dev/test data
+  populate_tables2.py        # seed script (extended)
+  dump_tables.py             # dump table contents for inspection
+  debug_sleep.py             # sleep data debug utility
+```
+
+### Knowledge Base — `knowledge/`
+
+```
+knowledge/
+  *.txt                 # cleaned coaching transcripts for pgvector RAG ingestion
+                        # sources: Magness, Attia, Eriksson, Moore, Daniels
 ```
 
 ### Frontend — `frontend/src/`
@@ -117,7 +157,7 @@ pages/
                         # narrative, weather, readiness summary
   CheckIn.jsx           # morning readiness + post-workout reflection forms
   Strength.jsx          # strength logging: session builder, exercise search
-  Running.jsx           # running biomechanics analytics page
+  Running.jsx           # running biomechanics analytics (wired end-to-end)
   Training.jsx          # training load history, workout log
   Sleep.jsx             # sleep history
   Journal.jsx           # workout reflections journal
@@ -133,50 +173,48 @@ api/
   sleep.js, running.js, sync.js
 ```
 
-### Supporting Scripts
+### Root-Level
 
 ```
-db.py                   # psycopg2 connection helper (pipeline scripts)
-config.py               # env var loader (.env) for pipeline scripts
-ingest_knowledge.py     # one-time: embed coaching transcripts into pgvector
-import_wger.py          # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
-import_exercises.py     # one-time: imported 36 custom exercises
-backfill_workouts.py    # one-time: backfilled historical Garmin data
-backfill_sleep.py       # one-time: backfilled historical sleep data
-migrate_cascade.py      # schema migration helper
-schema.sql              # canonical PostgreSQL schema
-dump.sql                # DB dump (loaded by Docker on first init)
+main.py                 # Garmin sync orchestrator (subprocess calls)
+config.py               # env var loader (.env) for ingestion + scripts
 ```
 
 ## Database Schema (PostgreSQL)
 
 ```
-users
+users                      (email_verified BOOLEAN, verification_token — proper auth columns)
   └─ user_profile          (FK: user_id — goal, gym_days_week, primary_sports JSONB)
   └─ workouts              (FK: user_id — sport, HR zones, VO2max, biomechanics, GPS)
        ├─ environment_data (FK: workout_id nullable — weather, UV, pollen per session)
-       └─ workout_metrics  (FK: workout_id — time-series HR, pace, cadence, power)
+       └─ workout_metrics  (FK: workout_id — time-series HR, pace, cadence, power; seeded)
   └─ sleep_sessions        (FK: user_id — duration, score, HRV, stages, Body Battery)
   └─ daily_readiness       (FK: user_id — overall/legs/upper/joint feel, time_available,
                                           going_out_tonight)
   └─ workout_reflection    (FK: user_id — session RPE, quality, load_feel, notes)
-  └─ strength_sessions     (FK: user_id)
+  └─ daily_subjective      (FK: user_id — mood, energy, stress, notes)
+  └─ strength_sessions     (FK: user_id; seeded with strength training workouts)
        └─ strength_exercises (FK: session_id)
             └─ strength_sets (FK: exercise_id — weight, reps, rpe)
+  └─ narrative_cache       (FK: user_id — date + cache_key UNIQUE; busts on sport change)
   └─ nutrition_log         (FK: user_id — schema defined, not implemented)
   └─ injuries              (FK: user_id — schema defined, not implemented)
 exercises                  (pool of ~797: 36 custom + 761 wger, movement pattern,
                             quality focus, primary/secondary muscles, equipment,
-                            skill level — enables recommendation engine)
+                            skill level — enables recommendation engine; seeded)
+exercise_progressions      (FK: exercise_id — tracks progressive overload per user)
 knowledge_chunks           (pgvector: coaching transcript embeddings for RAG)
 ```
 
 **Key schema notes:**
+- `users` has `email_verified` and `verification_token` columns for the email verification flow
 - `environment_data.workout_id` is nullable — NULL means a rest day (no placeholder workouts)
 - `workouts` has `UNIQUE (user_id, start_time)` — duplicate detection on ingest
 - `daily_readiness` captures `going_out_tonight` (social schedule affects tomorrow's training)
 - `workout_reflection.load_feel` is a -2 to +2 scale (too easy → too hard) — used to calibrate future recommendations
 - `user_profile.primary_sports` is JSONB — keys are sport slugs, values are priority weights
+- `narrative_cache` is keyed by `(user_id, date, cache_key)` — cache_key is an MD5 of sports preferences; busts when sport profile changes
+- `workout_metrics`, `exercises`, and `strength_sessions` are seeded with real data
 
 ## Intelligence Layer — How It Works
 
@@ -198,7 +236,7 @@ knowledge_chunks           (pgvector: coaching transcript embeddings for RAG)
   - Decay constant calibrated per muscle group (fast-twitch vs slow-twitch recovery rates)
   - Freshness score surfaced on Dashboard as muscle group heatmap
 
-### Recommendation Engine (`recommend.py`)
+### Recommendation Engine (`core/recommend.py`)
 
 Integrates:
 1. HRV status + TSB → readiness signal
@@ -211,7 +249,7 @@ Integrates:
 
 Output: recommended sport, session type, intensity zone, exercise suggestions.
 
-### Narrative Layer (`api/services/narrative.py` + `api/services/rag.py`)
+### Narrative Layer (`api/ai/narrative.py` + `api/ai/rag.py`)
 
 When the dashboard loads:
 1. `rag.py` runs a pgvector cosine similarity search against `knowledge_chunks` using the current context (e.g. "Z2 base building, suppressed HRV, ankle rehab")
@@ -263,22 +301,23 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 
 ## What's Built and Working
 
-- Auth: register / login / JWT / email verification, multi-user
-- Garmin sync pipeline: workout + sleep + environment ingest
+- Auth: register / login / JWT / email verification, multi-user; `users` table has proper `email_verified` + `verification_token` columns
+- Garmin sync pipeline: workout + sleep + environment + workout_metrics ingest
 - Dashboard: ATL/CTL/TSB, HRV status, muscle freshness heatmap, alerts, Claude narrative, weather, sleep summary, readiness summary
-- Strength logging: session builder, exercise search (797 exercises), sets with progressive overload tracking
+- Strength logging: session builder, exercise search (797 exercises), sets with progressive overload tracking; strength sessions seeded
 - Morning check-in / readiness form (`daily_readiness`)
 - Post-workout reflection form (`workout_reflection`)
 - Profile: sport picker, training goal, gym days/week, Garmin credentials
-- Narrative cache keyed by sports preferences
-- pgvector RAG knowledge base scaffold (`knowledge_chunks` table + `rag.py`)
+- Narrative cache (`narrative_cache` table) keyed by sports preferences — busts on profile change
+- pgvector RAG knowledge base (`knowledge_chunks` table + `rag.py`); coaching transcripts in `Science/`
+- Running biomechanics page wired end-to-end: `core/analytics/biomechanics.py` → `api/services/running.py` → `api/routers/v1/running.py` → `frontend/src/pages/Running.jsx`
+- `workout_metrics` time-series seeded with real data; `exercises` table seeded (~797 exercises)
 
 ## What's Half-Built
 
 - **Exercise suggestions on Dashboard** — recommendation engine outputs them, Dashboard UI doesn't display them yet
 - **Goal-based recommendation differentiation** — athlete vs strength vs hypertrophy logic not fully separated
-- **Running biomechanics page** — `analytics/biomechanics.py` is written, `api/services/running.py` exists, frontend `Running.jsx` exists — needs wiring end-to-end
-- **workout_metrics time-series** — schema exists, `backfill_workout_metrics.py` exists, API ingestion not fully implemented
+- **workout_metrics API ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; live ingestion on Garmin sync not fully wired
 
 ## What Doesn't Exist Yet
 

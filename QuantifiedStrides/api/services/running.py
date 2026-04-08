@@ -43,8 +43,8 @@ class RunningService:
     # Running economy trends (multi-workout)
     # ------------------------------------------------------------------
 
-    async def get_running_trends(self, days: int = 365) -> list[RunningTrendPointSchema]:
-        rows = await asyncio.to_thread(self._running_trends, days)
+    async def get_running_trends(self, days: int = 365, user_id: int = 1) -> list[RunningTrendPointSchema]:
+        rows = await asyncio.to_thread(self._running_trends, days, user_id)
         return [
             RunningTrendPointSchema(
                 workout_id=r["workout_id"],
@@ -64,10 +64,10 @@ class RunningService:
             for r in rows
         ]
 
-    def _running_trends(self, days: int) -> list[dict]:
+    def _running_trends(self, days: int, user_id: int = 1) -> list[dict]:
         conn = get_connection()
         try:
-            return get_running_trends(days=days, conn=conn)
+            return get_running_trends(days=days, user_id=user_id, conn=conn)
         finally:
             conn.close()
 
@@ -105,8 +105,8 @@ class RunningService:
     # Biomechanics trends (multi-workout)
     # ------------------------------------------------------------------
 
-    async def get_biomechanics_trends(self, days: int = 365) -> list[BiomechanicsTrendPointSchema]:
-        rows = await asyncio.to_thread(self._biomechanics_trends, days)
+    async def get_biomechanics_trends(self, days: int = 365, user_id: int = 1) -> list[BiomechanicsTrendPointSchema]:
+        rows = await asyncio.to_thread(self._biomechanics_trends, days, user_id)
         return [
             BiomechanicsTrendPointSchema(
                 workout_id=r["workout_id"],
@@ -127,10 +127,10 @@ class RunningService:
             for r in rows
         ]
 
-    def _biomechanics_trends(self, days: int) -> list[dict]:
+    def _biomechanics_trends(self, days: int, user_id: int = 1) -> list[dict]:
         conn = get_connection()
         try:
-            return get_biomechanics_trends(days=days, conn=conn)
+            return get_biomechanics_trends(days=days, user_id=user_id, conn=conn)
         finally:
             conn.close()
 

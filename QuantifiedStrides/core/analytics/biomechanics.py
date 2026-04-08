@@ -239,7 +239,7 @@ def get_workout_biomechanics(workout_id: int, conn=None) -> Optional[dict]:
 # Longitudinal trends
 # ---------------------------------------------------------------------------
 
-def get_biomechanics_trends(days: int = 365, conn=None) -> list[dict]:
+def get_biomechanics_trends(days: int = 365, conn=None, user_id: int = 1) -> list[dict]:
     """
     Per-workout biomechanics summary + fatigue signature for all running
     workouts in the last `days` days, sorted by date.
@@ -254,11 +254,11 @@ def get_biomechanics_trends(days: int = 365, conn=None) -> list[dict]:
     cur.execute("""
         SELECT workout_id, workout_date, sport, training_volume
         FROM workouts
-        WHERE user_id = 1
+        WHERE user_id = %s
           AND sport IN ('running', 'trail_running')
           AND workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
         ORDER BY workout_date
-    """, (days,))
+    """, (user_id, days,))
     workouts = cur.fetchall()
     cur.close()
 

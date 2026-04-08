@@ -22,11 +22,11 @@ from api.schemas.dashboard import (
     WeatherSchema,
     ReadinessSummarySchema,
 )
-from api.services.training_load import TrainingLoadService
-from api.services.recovery import RecoveryService
-from api.services.alerts import AlertsService
-from api.services.recommendation import RecommendationService
-from api.services.narrative import generate_narrative
+from api.services.adapters.training_load import TrainingLoadService
+from api.services.adapters.recovery import RecoveryService
+from api.services.adapters.alerts import AlertsService
+from api.services.adapters.recommendation import RecommendationService
+from api.ai.narrative import generate_narrative
 
 from db.db import get_connection
 from core.recommend import get_last_nights_sleep, get_latest_weather, get_recent_load_by_sport

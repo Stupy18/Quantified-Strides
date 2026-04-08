@@ -10,18 +10,22 @@ QuantifiedStrides is a fusion of sports science, data engineering, and applied M
 
 ```
 Data Sources
-  ├── Garmin Connect API    → workout.py / sleep.py / environment.py
-  └── OpenWeatherMap API    → environment.py
+  ├── Garmin Connect API    → ingestion/workout.py + workout_metrics.py + sleep.py
+  └── OpenWeatherMap API    → ingestion/environment.py
 
 FastAPI Backend (api/)
-  ├── Auth                  JWT (HS256, 30-day) + email verification
-  ├── Dashboard             ATL/CTL/TSB, HRV, muscle freshness, narrative
-  ├── Training Load         TRIMP, ATL/CTL/TSB, ramp rate
-  ├── Recovery              HRV z-score, muscle fatigue decay model
-  ├── Alerts                Anomaly detection, overtraining flags
-  ├── Recommendation        Daily session planner integrating all signals
-  ├── Narrative             Claude API — pattern → language (RAG-grounded)
-  └── RAG                   pgvector cosine similarity over coaching transcripts
+  ├── routers/v1/           HTTP controllers — thin, no logic
+  ├── services/             Business logic + DB queries
+  │   └── adapters/         Async bridges to sync core/ modules
+  ├── ai/                   Claude API narrative + pgvector RAG
+  └── schemas/              Pydantic request/response models
+
+Intelligence Layer (core/)
+  ├── training_load.py      TRIMP, ATL/CTL/TSB, ramp rate
+  ├── recovery.py           HRV z-score, muscle fatigue decay model
+  ├── alerts.py             Anomaly detection, overtraining flags
+  ├── recommend.py          Daily session planner integrating all signals
+  └── analytics/            Biomechanics, running economy, terrain response
 
 PostgreSQL (Docker — pgvector/pgvector:pg16)
   ├── users / user_profile  (goal, gym_days, primary_sports JSONB, Garmin creds)
@@ -32,13 +36,14 @@ PostgreSQL (Docker — pgvector/pgvector:pg16)
   ├── workout_reflection    (RPE, session quality, load feel)
   ├── strength_sessions / exercises / sets
   ├── exercises             (~797: 36 custom + 761 wger, full muscle/equipment taxonomy)
+  ├── narrative_cache       (per-user per-day, busts on sport profile change)
   └── knowledge_chunks      (pgvector embeddings — coaching transcripts for RAG)
 
 React Frontend (Vite + shadcn/ui, port 5173)
   ├── Dashboard             Alerts, today's plan, ATL/CTL/TSB, muscle heatmap, narrative
   ├── Check-In              Morning readiness + post-workout reflection
   ├── Strength              Session builder, exercise search, progressive overload
-  ├── Running               Biomechanics analytics
+  ├── Running               Biomechanics analytics (wired end-to-end)
   ├── Training              Load history, workout log
   ├── Sleep                 Sleep history
   ├── Journal               Workout reflections timeline
@@ -112,9 +117,9 @@ uvicorn api.main:app --reload --port 8000
 cd frontend && npm run dev
 
 # Garmin sync (manual — or trigger via UI Sync button)
-python workout.py
-python sleep.py
-python environment.py
+python ingestion/workout.py
+python ingestion/sleep.py
+python ingestion/environment.py
 ```
 
 ---
@@ -160,20 +165,21 @@ Running · Trail Running · Mountain Biking · Cycling · Indoor Cycling · Boul
 
 ## What's Built
 
-- Auth: register / login / JWT / email verification, multi-user
-- Garmin sync: workout + sleep + environment ingest, deduplication via `UNIQUE (user_id, start_time)`
+- Auth: register / login / JWT / email verification, multi-user; proper `email_verified` + `verification_token` columns
+- Garmin sync: workout + sleep + environment + workout_metrics ingest, deduplication via `UNIQUE (user_id, start_time)`
 - Dashboard: ATL/CTL/TSB, HRV status, muscle freshness heatmap, alerts, Claude narrative, weather, sleep and readiness summaries
-- Strength logging: session builder, 797-exercise search, sets with progressive overload tracking
+- Strength logging: session builder, 797-exercise search, sets with progressive overload tracking; seeded with real data
 - Morning check-in / post-workout reflection
 - Profile: sport picker, training goal, gym days/week, Garmin credentials
-- pgvector RAG knowledge base with coaching transcript embeddings
+- Running biomechanics page wired end-to-end: `core/analytics/biomechanics.py` → API → React
+- pgvector RAG knowledge base with coaching transcript embeddings (`knowledge/`)
+- Narrative cache (`narrative_cache` table) — Claude only called when inputs change
 
 ## What's In Progress
 
 - Exercise suggestions on Dashboard (engine outputs them, UI doesn't display yet)
 - Goal-based recommendation differentiation (athlete / strength / hypertrophy)
-- Running biomechanics page (analytics written, needs end-to-end wiring)
-- `workout_metrics` time-series ingestion
+- `workout_metrics` live ingestion on Garmin sync (backfilled; not yet wired into live sync trigger)
 
 ## Planned
 

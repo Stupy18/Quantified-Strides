@@ -13,7 +13,7 @@ import anthropic
 from sqlalchemy import text
 
 from api.schemas.dashboard import RecommendationSchema
-from api.services.rag import retrieve
+from api.ai.rag import retrieve
 from config import ANTHROPIC_API_KEY
 from sqlalchemy.ext.asyncio import AsyncSession
 

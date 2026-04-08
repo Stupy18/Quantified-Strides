@@ -282,7 +282,7 @@ def get_running_economy_index(workout_id: int, conn=None) -> Optional[dict]:
 # Multi-workout trend queries (used by Streamlit + notebooks)
 # ---------------------------------------------------------------------------
 
-def get_running_trends(days: int = 365, conn=None) -> list[dict]:
+def get_running_trends(days: int = 365, conn=None, user_id: int = 1) -> list[dict]:
     """
     For every running/trail_running workout in the last `days` days,
     compute GAP, decoupling, and REI.
@@ -295,14 +295,18 @@ def get_running_trends(days: int = 365, conn=None) -> list[dict]:
 
     cur = conn.cursor()
     cur.execute("""
-        SELECT workout_id, workout_date, sport, training_volume,
-               avg_heart_rate, normalized_power
-        FROM workouts
-        WHERE user_id = 1
-          AND sport IN ('running', 'trail_running')
-          AND workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
-        ORDER BY workout_date
-    """, (days,))
+                SELECT workout_id,
+                       workout_date,
+                       sport,
+                       training_volume,
+                       avg_heart_rate,
+                       normalized_power
+                FROM workouts
+                WHERE user_id = %s
+                  AND sport IN ('running', 'trail_running')
+                  AND workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+                ORDER BY workout_date
+                """, (user_id, days,))
     workouts = cur.fetchall()
 
     results = []
