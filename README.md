@@ -80,7 +80,7 @@ On dashboard load, pgvector similarity search retrieves top-k coaching transcrip
 ### Prerequisites
 - Docker
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+
 
 ### Setup
 
