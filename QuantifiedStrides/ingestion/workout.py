@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import garminconnect
 
 from config import GARMIN_EMAIL, GARMIN_PASSWORD
-from db.db import get_connection
+from db.session import get_connection
 
 # 1) Connect to Garmin
 client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)

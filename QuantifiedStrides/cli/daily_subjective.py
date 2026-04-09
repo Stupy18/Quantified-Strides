@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from db.db import get_connection
+from db.session import get_connection
 
 conn = get_connection()
 cursor = conn.cursor()

@@ -6,4 +6,4 @@ __pycache__/
 coverage/
 .idea/
 db/dump.sql
-test_report.json
+tests/test_report.json

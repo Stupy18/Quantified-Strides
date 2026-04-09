@@ -1,84 +1,74 @@
-import subprocess
-import sys
-import time
-import logging
-from datetime import datetime
+"""
+QuantifiedStrides FastAPI application entry point.
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("quantified_strides.log"),
-        logging.StreamHandler()
-    ]
+Run with:
+    uvicorn api.main:app --reload --port 8000
+
+API docs:
+    http://localhost:8000/docs
+    http://localhost:8000/redoc
+"""
+
+import traceback
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from core.settings import settings
+from api.v1 import auth, dashboard, training, sleep, strength, checkin, running, sync
+
+app = FastAPI(
+    title="QuantifiedStrides API",
+    version="1.0.0",
+    description="Athlete performance monitoring — training load, recovery, strength, and AI recommendations.",
 )
 
-logger = logging.getLogger("QuantifiedStrides")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.api_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ------------------------------------------------------------------
+# v1 api
+# ------------------------------------------------------------------
+
+_V1 = "/api/v1"
+
+app.include_router(auth.router,      prefix=_V1)
+app.include_router(dashboard.router, prefix=_V1)
+app.include_router(training.router,  prefix=_V1)
+app.include_router(sleep.router,     prefix=_V1)
+app.include_router(strength.router,  prefix=_V1)
+app.include_router(checkin.router,   prefix=_V1)
+app.include_router(running.router,   prefix=_V1)
+app.include_router(sync.router,      prefix=_V1)
 
 
-def run_script(script_name):
-    """Run a Python script and log its output"""
-    logger.info(f"Starting {script_name}")
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": type(exc).__name__, "detail": str(exc), "traceback": traceback.format_exc()},
+    )
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@app.get("/db-test")
+async def db_test():
     try:
-        result = subprocess.run(
-            [sys.executable, script_name],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        logger.info(f"{script_name} output: {result.stdout}")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running {script_name}: {e}")
-        logger.error(f"Script output: {e.stdout}")
-        logger.error(f"Script error: {e.stderr}")
-        return False
-
-
-def main():
-    """Main function to run all data collection scripts"""
-    logger.info("===== Starting QuantifiedStrides data collection =====")
-    logger.info(f"Current time: {datetime.now()}")
-
-    # 1. Run the workout data collection
-    workout_success = run_script("workout.py")
-    if workout_success:
-        logger.info("Workout data collection completed successfully")
-    else:
-        logger.warning("Workout data collection failed")
-
-    # 2. Run the workout time-series metrics (depends on workout.py having run first)
-    if workout_success:
-        metrics_success = run_script("workout_metrics.py")
-        if metrics_success:
-            logger.info("Workout metrics collection completed successfully")
-        else:
-            logger.warning("Workout metrics collection failed")
-    else:
-        metrics_success = False
-        logger.warning("Skipping workout metrics — workout data collection failed")
-
-    # 3. Run the sleep data collection
-    sleep_success = run_script("sleep.py")
-    if sleep_success:
-        logger.info("Sleep data collection completed successfully")
-    else:
-        logger.warning("Sleep data collection failed")
-
-    # 4. Run the environment data collection
-    env_success = run_script("environment.py")
-    if env_success:
-        logger.info("Environment data collection completed successfully")
-    else:
-        logger.warning("Environment data collection failed")
-
-    # Summary
-    logger.info("===== QuantifiedStrides data collection complete =====")
-    success_count = sum([workout_success, metrics_success, sleep_success, env_success])
-    logger.info(f"Successfully ran {success_count}/4 scripts")
-
-
-if __name__ == "__main__":
-    main()
+        import asyncpg
+        from core.settings import settings
+        conn = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg", "postgresql"))
+        row = await conn.fetchrow("SELECT COUNT(*) AS n FROM sleep_sessions")
+        await conn.close()
+        return {"status": "connected", "sleep_sessions": row["n"]}
+    except Exception as exc:
+        return {"status": "failed", "error": type(exc).__name__, "detail": str(exc)}

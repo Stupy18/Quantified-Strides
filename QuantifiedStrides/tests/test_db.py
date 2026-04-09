@@ -1,4 +1,4 @@
-"""Tests for db.py — connection and schema validation."""
+"""Tests for session.py — connection and schema validation."""
 
 import pytest
 import psycopg2

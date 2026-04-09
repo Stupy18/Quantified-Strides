@@ -11,7 +11,7 @@ import argparse
 import sys
 from datetime import date, datetime
 
-from db.db import get_connection
+from db.session import get_connection
 
 
 # ---------------------------------------------------------------------------

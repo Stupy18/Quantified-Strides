@@ -111,7 +111,7 @@ cd frontend && npm install && cd ..
 
 ```bash
 # Backend — http://localhost:8000/docs
-uvicorn api.main:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 
 # Frontend — http://localhost:5173
 cd frontend && npm run dev

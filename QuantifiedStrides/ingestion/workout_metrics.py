@@ -3,7 +3,7 @@ from datetime import datetime
 import garminconnect
 
 from config import GARMIN_EMAIL, GARMIN_PASSWORD
-from db.db import get_connection
+from db.session import get_connection
 
 # Maps Garmin metric descriptor keys to workout_metrics column names.
 # directDoubleCadence is the full steps/min figure; directCadence is half-cadence.

@@ -13,7 +13,7 @@ import time
 import anthropic
 
 from config import ANTHROPIC_API_KEY
-from db.db import get_connection
+from db.session import get_connection
 
 
 MUSCLE_VOCABULARY = [
