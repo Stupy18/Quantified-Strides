@@ -265,6 +265,15 @@ CREATE TABLE exercise_progressions (
     UNIQUE (from_exercise_id, to_exercise_id, goal_branch)
 );
 
+CREATE TABLE journal_entries (
+    entry_id   SERIAL PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    entry_date DATE NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, entry_date)
+);
+
 -- ---------------------------------------------------------------------------
 -- RAG knowledge base (pgvector)
 -- ---------------------------------------------------------------------------
