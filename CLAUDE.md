@@ -16,8 +16,8 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 | Database | PostgreSQL (`quantifiedstrides`) via Docker (`pgvector/pgvector:pg16`) |
 | Frontend | React (Vite, port 5173) + shadcn/ui components |
 | Auth | JWT (HS256, 30-day expiry) + email verification via SMTP |
-| Narrative | Anthropic Claude API (`api/services/narrative.py`) |
-| RAG | pgvector extension + `api/services/rag.py` |
+| Narrative | Anthropic Claude API (`ai/narrative.py`) |
+| RAG | pgvector extension + `ai/rag.py` |
 | Config | `pydantic-settings` loading from `.env` |
 
 ## Running Locally
@@ -26,8 +26,8 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 # Database (Docker)
 docker compose up -d
 
-# Backend
-uvicorn api.main:app --reload --port 8000
+# Backend (run from QuantifiedStrides/)
+uvicorn main:app --reload --port 8000
 # Docs: http://localhost:8000/docs
 
 # Frontend
@@ -43,48 +43,49 @@ python environment.py
 
 ## Project Structure
 
-### Backend — `api/`
+### Backend
 
 ```
-api/
-  main.py               # FastAPI app, CORS, router registration
-  settings.py           # pydantic-settings config (DB, JWT, SMTP, Anthropic key)
-  deps.py               # FastAPI Depends: get_db(), get_current_user()
-  routers/v1/
-    auth.py             # register, login, verify-email, me
-    dashboard.py        # GET /dashboard — full daily summary
-    training.py         # workout history, training load
-    sleep.py            # sleep history
-    strength.py         # strength sessions, exercises, sets
-    checkin.py          # daily readiness + post-workout reflection
-    running.py          # running biomechanics analytics
-    sync.py             # POST /sync/garmin — triggers Garmin pipeline
-  services/
-    auth.py             # JWT issue/verify, password hash, email verification
-    email.py            # SMTP email sending
-    dashboard.py        # orchestrates all services into one dashboard payload
-    checkin.py          # readiness + reflection CRUD
-    strength.py         # strength session/exercise/set CRUD + 1RM
-    running.py          # running biomechanics computations
-    sleep.py            # sleep history queries
-    training.py         # workout history queries
-    adapters/           # thin async wrappers — bridge sync core/ to async API
-      training_load.py  # asyncio.to_thread wrapper around core.training_load
-      recovery.py       # asyncio.to_thread wrapper around core.recovery
-      alerts.py         # asyncio.to_thread wrapper around core.alerts
-      recommendation.py # asyncio.to_thread wrapper around core.recommend
-  ai/
-    narrative.py        # Claude API call — RAG-grounded narrative, cached per user/day
-    rag.py              # pgvector cosine similarity search for knowledge injection
-  schemas/
-    auth.py, checkin.py, dashboard.py, strength.py, training.py,
-    sleep.py, running.py
-```
-
-### Intelligence Layer — `core/`
-
-```
+main.py               # FastAPI app, CORS, router registration
+deps.py               # FastAPI Depends: get_db(), get_current_user()
 core/
+  settings.py         # pydantic-settings config (DB, JWT, SMTP, Anthropic key)
+  config.py           # env var loader (.env) for ingestion pipeline (Garmin, OpenWeather)
+api/v1/
+  auth.py             # register, login, verify-email, me
+  dashboard.py        # GET /dashboard — full daily summary
+  training.py         # workout history, training load
+  sleep.py            # sleep history
+  strength.py         # strength sessions, exercises, sets
+  checkin.py          # daily readiness + post-workout reflection
+  running.py          # running biomechanics analytics
+  sync.py             # POST /sync/garmin — triggers Garmin pipeline
+services/
+  auth.py             # JWT issue/verify, password hash, email verification
+  email.py            # SMTP email sending
+  dashboard.py        # orchestrates all services into one dashboard payload
+  checkin.py          # readiness + reflection CRUD
+  strength.py         # strength session/exercise/set CRUD + 1RM
+  running.py          # running biomechanics computations
+  sleep.py            # sleep history queries
+  training.py         # workout history queries
+  adapters/           # thin async wrappers — bridge sync intelligence/ to async API
+    training_load.py  # asyncio.to_thread wrapper around intelligence.training_load
+    recovery.py       # asyncio.to_thread wrapper around intelligence.recovery
+    alerts.py         # asyncio.to_thread wrapper around intelligence.alerts
+    recommendation.py # asyncio.to_thread wrapper around intelligence.recommend
+ai/
+  narrative.py        # Claude API call — RAG-grounded narrative, cached per user/day
+  rag.py              # pgvector cosine similarity search for knowledge injection
+models/
+  auth.py, checkin.py, dashboard.py, strength.py, training.py,
+  sleep.py, running.py
+```
+
+### Intelligence Layer — `intelligence/`
+
+```
+intelligence/
   training_load.py      # TRIMP, ATL/CTL/TSB, ramp rate, load history
   recovery.py           # HRV rolling z-score, muscle fatigue decay
   alerts.py             # anomaly detection, overtraining alerts, interpretations
@@ -119,7 +120,7 @@ cli/
 
 ```
 db/
-  db.py                 # psycopg2 connection helper (used by ingestion + scripts)
+  session.py            # SQLAlchemy async session + engine setup
   schema.sql            # canonical PostgreSQL schema
 ```
 
@@ -173,11 +174,14 @@ api/
   sleep.js, running.js, sync.js
 ```
 
-### Root-Level
+### Root-Level (`QuantifiedStrides/`)
 
 ```
-main.py                 # Garmin sync orchestrator (subprocess calls)
-config.py               # env var loader (.env) for ingestion + scripts
+main.py                 # FastAPI app entry point (imports app from routers, registers middleware)
+deps.py                 # shared FastAPI dependencies (get_db, get_current_user)
+requirements.txt
+docker-compose.yml
+.env / .env.example
 ```
 
 ## Database Schema (PostgreSQL)
@@ -236,7 +240,7 @@ knowledge_chunks           (pgvector: coaching transcript embeddings for RAG)
   - Decay constant calibrated per muscle group (fast-twitch vs slow-twitch recovery rates)
   - Freshness score surfaced on Dashboard as muscle group heatmap
 
-### Recommendation Engine (`core/recommend.py`)
+### Recommendation Engine (`intelligence/recommend.py`)
 
 Integrates:
 1. HRV status + TSB → readiness signal
@@ -249,7 +253,7 @@ Integrates:
 
 Output: recommended sport, session type, intensity zone, exercise suggestions.
 
-### Narrative Layer (`api/ai/narrative.py` + `api/ai/rag.py`)
+### Narrative Layer (`ai/narrative.py` + `ai/rag.py`)
 
 When the dashboard loads:
 1. `rag.py` runs a pgvector cosine similarity search against `knowledge_chunks` using the current context (e.g. "Z2 base building, suppressed HRV, ankle rehab")
@@ -309,8 +313,8 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - Post-workout reflection form (`workout_reflection`)
 - Profile: sport picker, training goal, gym days/week, Garmin credentials
 - Narrative cache (`narrative_cache` table) keyed by sports preferences — busts on profile change
-- pgvector RAG knowledge base (`knowledge_chunks` table + `rag.py`); coaching transcripts in `Science/`
-- Running biomechanics page wired end-to-end: `core/analytics/biomechanics.py` → `api/services/running.py` → `api/routers/v1/running.py` → `frontend/src/pages/Running.jsx`
+- pgvector RAG knowledge base (`knowledge_chunks` table + `ai/rag.py`); coaching transcripts in `knowledge/`
+- Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
 - `workout_metrics` time-series seeded with real data; `exercises` table seeded (~797 exercises)
 
 ## What's Half-Built
