@@ -120,6 +120,17 @@ cd frontend && npm run dev
 python ingestion/workout.py
 python ingestion/sleep.py
 python ingestion/environment.py
+
+
+#If you have previously completed the setup, and this isn't
+#the first time running, simply run this command from project
+#root (../QuantifiedStrides) for both DB and BE
+cd QuantifiedStrides/ && docker compose up -d && source .venv/bin/activate && uvicorn main:app --reload --port 8000
+
+#And then run the following from root in another terminal
+#for frontend
+cd frontend/ && npm run dev
+
 ```
 
 ---
