@@ -5,12 +5,11 @@ Auth service — register, login, profile get/update.
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
+from jose import jwt
 from passlib.context import CryptContext
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.settings import settings
+from repos.user_repo import UserRepo
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -40,7 +39,7 @@ def decode_token(token: str) -> int:
 # ── register ──────────────────────────────────────────────────────────────────
 
 async def register(
-    db: AsyncSession,
+    repo: UserRepo,
     name: str,
     email: str,
     password: str,
@@ -48,97 +47,54 @@ async def register(
     gym_days_week: int,
     primary_sports: dict,
 ) -> dict:
-    # Check email not already taken
-    existing = await db.execute(
-        text("SELECT user_id FROM users WHERE email = :email"),
-        {"email": email},
-    )
-    if existing.fetchone():
+    if await repo.email_exists(email):
         raise ValueError("Email already registered")
 
-    password_hash = hash_password(password)
-
     verification_token = secrets.token_urlsafe(32)
+    user_id = await repo.insert_user(name, email, hash_password(password), verification_token)
+    await repo.insert_profile(user_id, goal, gym_days_week, primary_sports)
+    await repo.db.commit()
 
-    # Insert user
-    result = await db.execute(
-        text("""
-            INSERT INTO users (name, email, password_hash, email_verified, verification_token)
-            VALUES (:name, :email, :hash, FALSE, :token)
-            RETURNING user_id
-        """),
-        {"name": name, "email": email, "hash": password_hash, "token": verification_token},
-    )
-    user_id = result.scalar_one()
-
-    # Insert profile (JSONB needs explicit cast for asyncpg)
-    import json
-    await db.execute(
-        text("""
-            INSERT INTO user_profile (user_id, goal, gym_days_week, primary_sports)
-            VALUES (:uid, :goal, :gym, CAST(:sports AS jsonb))
-        """),
-        {
-            "uid": user_id,
-            "goal": goal,
-            "gym": gym_days_week,
-            "sports": json.dumps(primary_sports),
-        },
-    )
-    await db.commit()
     return {"user_id": user_id, "name": name, "email": email, "verification_token": verification_token}
 
 
 # ── login ─────────────────────────────────────────────────────────────────────
 
-async def login(db: AsyncSession, email: str, password: str) -> dict:
-    result = await db.execute(
-        text("SELECT user_id, name, password_hash, email_verified FROM users WHERE email = :email"),
-        {"email": email},
-    )
-    row = result.fetchone()
+async def login(repo: UserRepo, email: str, password: str) -> dict:
+    row = await repo.get_by_email(email)
+
     if not row or not verify_password(password, row.password_hash):
         raise ValueError("Invalid email or password")
     if not row.email_verified:
         raise ValueError("Please verify your email before signing in")
+
     token = create_token(row.user_id)
     return {"access_token": token, "token_type": "bearer", "user_id": row.user_id, "name": row.name}
 
 
-async def verify_email(db: AsyncSession, token: str) -> dict:
-    result = await db.execute(
-        text("SELECT user_id, name, email FROM users WHERE verification_token = :token AND email_verified = FALSE"),
-        {"token": token},
-    )
-    row = result.fetchone()
+# ── email verification ────────────────────────────────────────────────────────
+
+async def verify_email(repo: UserRepo, token: str) -> dict:
+    row = await repo.get_by_verification_token(token)
+
     if not row:
         raise ValueError("Invalid or already used verification link")
-    await db.execute(
-        text("UPDATE users SET email_verified = TRUE, verification_token = NULL WHERE user_id = :uid"),
-        {"uid": row.user_id},
-    )
-    await db.commit()
+
+    await repo.mark_email_verified(row.user_id)
+    await repo.db.commit()
+
     jwt_token = create_token(row.user_id)
     return {"access_token": jwt_token, "token_type": "bearer", "user_id": row.user_id, "name": row.name}
 
 
 # ── me (get + update) ─────────────────────────────────────────────────────────
 
-async def get_me(db: AsyncSession, user_id: int) -> dict:
-    result = await db.execute(
-        text("""
-            SELECT u.user_id, u.name, u.email,
-                   p.goal, p.gym_days_week, p.primary_sports,
-                   p.garmin_email, p.garmin_password
-            FROM users u
-            LEFT JOIN user_profile p USING (user_id)
-            WHERE u.user_id = :uid
-        """),
-        {"uid": user_id},
-    )
-    row = result.fetchone()
+async def get_me(repo: UserRepo, user_id: int) -> dict:
+    row = await repo.get_by_id(user_id)
+
     if not row:
         raise ValueError("User not found")
+
     return {
         "user_id":         row.user_id,
         "name":            row.name,
@@ -151,13 +107,13 @@ async def get_me(db: AsyncSession, user_id: int) -> dict:
     }
 
 
-async def delete_user(db: AsyncSession, user_id: int) -> None:
-    await db.execute(text("DELETE FROM users WHERE user_id = :uid"), {"uid": user_id})
-    await db.commit()
+async def delete_user(repo: UserRepo, user_id: int) -> None:
+    await repo.delete(user_id)
+    await repo.db.commit()
 
 
 async def update_me(
-    db: AsyncSession,
+    repo: UserRepo,
     user_id: int,
     name: str | None,
     goal: str | None,
@@ -166,35 +122,21 @@ async def update_me(
     garmin_email: str | None,
     garmin_password: str | None,
 ) -> dict:
-    import json
     if name is not None:
-        await db.execute(
-            text("UPDATE users SET name = :name WHERE user_id = :uid"),
-            {"name": name, "uid": user_id},
-        )
+        await repo.update_name(user_id, name)
 
-    # Scalar profile fields (skip None, but allow empty string to clear values)
-    scalar_updates = {k: v for k, v in [
+    scalar_fields = {k: v for k, v in [
         ("goal", goal),
         ("gym_days_week", gym_days_week),
         ("garmin_email", garmin_email),
         ("garmin_password", garmin_password),
     ] if v is not None}
 
-    if scalar_updates:
-        set_clause = ", ".join(f"{k} = :{k}" for k in scalar_updates)
-        scalar_updates["uid"] = user_id
-        await db.execute(
-            text(f"UPDATE user_profile SET {set_clause} WHERE user_id = :uid"),
-            scalar_updates,
-        )
+    if scalar_fields:
+        await repo.update_profile(user_id, scalar_fields)
 
-    # JSONB field handled separately with explicit cast (required by asyncpg)
     if primary_sports is not None:
-        await db.execute(
-            text("UPDATE user_profile SET primary_sports = CAST(:v AS jsonb) WHERE user_id = :uid"),
-            {"v": json.dumps(primary_sports), "uid": user_id},
-        )
+        await repo.update_sports(user_id, primary_sports)
 
-    await db.commit()
-    return await get_me(db, user_id)
+    await repo.db.commit()
+    return await get_me(repo, user_id)

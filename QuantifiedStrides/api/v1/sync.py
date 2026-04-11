@@ -12,26 +12,13 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from deps import get_current_user_id, get_db
+from deps import get_current_user_id, get_user_repo
+from repos.user_repo import UserRepo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-
-
-async def _fetch_garmin_creds(user_id: int, db: AsyncSession) -> dict:
-    result = await db.execute(
-        text("SELECT garmin_email, garmin_password FROM user_profile WHERE user_id = :uid"),
-        {"uid": user_id},
-    )
-    row = result.fetchone()
-    if row and row.garmin_email and row.garmin_password:
-        return {"GARMIN_EMAIL": row.garmin_email, "GARMIN_PASSWORD": row.garmin_password}
-    # Fall back to .env values if not set on profile
-    return {}
 
 
 async def _run(script: str, extra_env: dict) -> dict:
@@ -59,9 +46,9 @@ async def _run(script: str, extra_env: dict) -> dict:
 @router.post("", status_code=200)
 async def trigger_sync(
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
+    repo: UserRepo = Depends(get_user_repo),
 ):
-    creds = await _fetch_garmin_creds(user_id, db)
+    creds = await repo.get_garmin_creds(user_id)
     results = []
 
     workout = await _run("workout.py", creds)
