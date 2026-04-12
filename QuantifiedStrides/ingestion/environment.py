@@ -2,7 +2,7 @@ from datetime import datetime
 
 import requests
 
-from config import OPENWEATHER_API_KEY
+from core.config import OPENWEATHER_API_KEY
 from db.session import AsyncSessionLocal
 from repos.environment_repo import EnvironmentRepo
 from sqlalchemy.ext.asyncio import AsyncSession
