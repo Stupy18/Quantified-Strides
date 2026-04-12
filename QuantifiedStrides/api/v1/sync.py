@@ -13,7 +13,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
-from deps import get_current_user_id, get_user_repo
+from deps import get_current_user_id, get_user_repo, AsyncSessionLocal
+from ingestion.environment import collect_environment_data
 from repos.user_repo import UserRepo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -58,6 +59,10 @@ async def trigger_sync(
         results.append(await _run("workout_metrics.py", creds))
 
     results.append(await _run("sleep.py", creds))
-    results.append(await _run("environment.py", creds))
+
+    # Direct async call instead of subprocess
+    async with AsyncSessionLocal() as db:
+        await collect_environment_data(db)
+    results.append({"ok": True})
 
     return {"ok": all(r["ok"] for r in results), "results": results}
