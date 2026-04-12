@@ -1,9 +1,11 @@
 from datetime import datetime
 
 import garminconnect
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import GARMIN_EMAIL, GARMIN_PASSWORD
-from db.session import get_connection
+from db.session import AsyncSessionLocal
+from repos.workout_repo import WorkoutRepo
+
 
 # Maps Garmin metric descriptor keys to workout_metrics column names.
 # directDoubleCadence is the full steps/min figure; directCadence is half-cadence.
@@ -49,7 +51,6 @@ def build_column_map(descriptors):
 
         if key == "directCadence" and has_double_cadence:
             continue
-
         if key not in GARMIN_KEY_TO_COLUMN:
             continue
 
@@ -67,185 +68,154 @@ def build_column_map(descriptors):
     return col_map
 
 
-def main():
-    # 1) Connect to Garmin and fetch the latest activity
-    client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-    client.login()
-
-    activities = client.get_activities(0, 1)
-    if not activities:
-        print("No activities found on Garmin Connect.")
-        return
-
-    activity = activities[0]
-    activity_id = activity["activityId"]
-    activity_name = activity.get("activityName", "Unknown")
-    start_time_str = activity.get("startTimeLocal", "")
-
-    print(f"Activity: {activity_name} (ID: {activity_id})")
-
+async def collect_workout_metrics(db: AsyncSession, user_id: int) -> bool:
     try:
-        start_time_dt = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        start_time_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        repo = WorkoutRepo(db)
+        try:
+            client = get_garmin_client()
+            activities = client.get_activities(0, 1)
+        except garminconnect.GarminConnectAuthenticationError:  # Restarts the Garmin client if connection fails
+            client = reset_garmin_client()
+            activities = client.get_activities(0, 1)
 
-    workout_date = start_time_dt.date()
+        # 1) Fetch the latest activity from Garmin
 
-    # 2) Connect to DB and find the matching workout_id
-    conn = get_connection()
-    cursor = conn.cursor()
+        if not activities:
+            print("No activities found on Garmin Connect.")
+            return False
 
-    # Match by exact start time first, fall back to date
-    cursor.execute(
-        "SELECT workout_id FROM workouts WHERE start_time = %s",
-        (start_time_dt,)
-    )
-    row = cursor.fetchone()
+        activity = activities[0]
+        activity_id = activity["activityId"]
+        activity_name = activity.get("activityName", "Unknown")
+        start_time_str = activity.get("startTimeLocal", "")
 
-    if not row:
-        cursor.execute(
-            "SELECT workout_id FROM workouts WHERE workout_date = %s AND user_id = 1",
-            (workout_date,)
+        print(f"Activity: {activity_name} (ID: {activity_id})")
+
+        try:
+            start_time_dt = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            start_time_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+
+        workout_date = start_time_dt.date()
+
+        # 2) Find the matching workout_id — exact start time first, fall back to date
+        row = await repo.get_by_start_time(user_id, start_time_dt)
+        if not row:
+            row = await repo.get_by_date(user_id, workout_date)
+        if not row:
+            print(f"No matching workout in DB for {workout_date}. Run workout.py first.")
+            return False
+
+        workout_id = row.workout_id
+        print(f"Matched workout_id: {workout_id}")
+
+        # 3) Skip if metrics already exist for this workout
+        if await repo.metrics_exist(workout_id):
+            print(f"workout_metrics already populated for workout_id {workout_id}. Skipping.")
+            return True
+
+        # 4) Download time-series details from Garmin
+        print("Downloading activity details...")
+        details = client.get_activity_details(activity_id, maxchart=2000)
+
+        descriptors = details.get("metricDescriptors", [])
+        data_points  = details.get("activityDetailMetrics", [])
+
+        if not descriptors or not data_points:
+            print("No time-series data in activity details.")
+            return False
+
+        timestamp_index = next(
+            (d["metricsIndex"] for d in descriptors if d["key"] == "directTimestamp"),
+            None,
         )
-        row = cursor.fetchone()
+        if timestamp_index is None:
+            print("No directTimestamp found in metricDescriptors.")
+            return False
 
-    if not row:
-        print(f"No matching workout in DB for {workout_date}. Run workout.py first.")
-        conn.close()
-        return
+        col_map = build_column_map(descriptors)
+        print(f"Mapped columns: {sorted(set(col for col, _ in col_map.values()))}")
 
-    workout_id = row[0]
-    print(f"Matched workout_id: {workout_id}")
+        # 5) Build rows for batch insert
+        rows = []
+        prev_altitude = None
+        prev_distance = None
 
-    # 3) Skip if metrics already exist for this workout
-    cursor.execute(
-        "SELECT COUNT(*) FROM workout_metrics WHERE workout_id = %s",
-        (workout_id,)
-    )
-    if cursor.fetchone()[0] > 0:
-        print(f"workout_metrics already populated for workout_id {workout_id}. Skipping.")
-        conn.close()
-        return
+        for point in data_points:
+            metrics = point.get("metrics", [])
 
-    # 4) Download time-series details from Garmin
-    print("Downloading activity details...")
-    details = client.get_activity_details(activity_id, maxchart=2000)
+            if timestamp_index >= len(metrics) or metrics[timestamp_index] is None:
+                continue
 
-    descriptors = details.get("metricDescriptors", [])
-    data_points = details.get("activityDetailMetrics", [])
+            metric_timestamp = datetime.fromtimestamp(metrics[timestamp_index] / 1000)
 
-    if not descriptors or not data_points:
-        print("No time-series data in activity details.")
-        conn.close()
-        return
+            values = {
+                "heart_rate": None, "pace": None, "cadence": None,
+                "vertical_oscillation": None, "vertical_ratio": None,
+                "ground_contact_time": None, "power": None,
+                "latitude": None, "longitude": None,
+                "altitude": None, "distance": None,
+            }
 
-    timestamp_index = next(
-        (d["metricsIndex"] for d in descriptors if d["key"] == "directTimestamp"),
-        None
-    )
-    if timestamp_index is None:
-        print("No directTimestamp found in metricDescriptors.")
-        conn.close()
-        return
+            for idx, (col_name, transform) in col_map.items():
+                if idx < len(metrics) and metrics[idx] is not None:
+                    values[col_name] = transform(metrics[idx])
 
-    col_map = build_column_map(descriptors)
-    print(f"Mapped columns: {sorted(set(col for col, _ in col_map.values()))}")
+            # Compute gradient_pct = Δaltitude / Δhorizontal_distance × 100
+            gradient_pct = None
+            alt  = values["altitude"]
+            dist = values["distance"]
+            pace = values["pace"]
 
-    sql_insert = """
-    INSERT INTO workout_metrics (
-        workout_id,
-        metric_timestamp,
-        heart_rate,
-        pace,
-        cadence,
-        vertical_oscillation,
-        vertical_ratio,
-        ground_contact_time,
-        power,
-        latitude,
-        longitude,
-        altitude,
-        distance,
-        gradient_pct
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-    """
+            if alt is not None and prev_altitude is not None:
+                d_alt  = alt - prev_altitude
+                d_dist = None
+                if dist is not None and prev_distance is not None:
+                    d_dist = dist - prev_distance
+                elif pace is not None and pace > 0:
+                    speed_ms = 1000.0 / (pace * 60.0)
+                    d_dist = speed_ms * 1.0   # 1-second intervals
+                if d_dist is not None and d_dist > 0.5:
+                    gradient_pct = round(d_alt / d_dist * 100, 2)
 
-    rows_inserted = 0
-    prev_altitude = None
-    prev_distance = None
+            if alt  is not None: prev_altitude = alt
+            if dist is not None: prev_distance = dist
 
-    for point in data_points:
-        metrics = point.get("metrics", [])
+            rows.append((
+                workout_id,
+                metric_timestamp,
+                values["heart_rate"],
+                values["pace"],
+                values["cadence"],
+                values["vertical_oscillation"],
+                values["vertical_ratio"],
+                values["ground_contact_time"],
+                values["power"],
+                values["latitude"],
+                values["longitude"],
+                values["altitude"],
+                values["distance"],
+                gradient_pct,
+            ))
 
-        if timestamp_index >= len(metrics) or metrics[timestamp_index] is None:
-            continue
+        # 6) Batch insert via repo
+        count = await repo.insert_metrics_batch(rows)
+        await db.commit()
+        print(f"Inserted {count} metric records for workout_id {workout_id}.")
+        return True
 
-        metric_timestamp = datetime.fromtimestamp(metrics[timestamp_index] / 1000)
-
-        values = {
-            "heart_rate": None,
-            "pace": None,
-            "cadence": None,
-            "vertical_oscillation": None,
-            "vertical_ratio": None,
-            "ground_contact_time": None,
-            "power": None,
-            "latitude": None,
-            "longitude": None,
-            "altitude": None,
-            "distance": None,
-        }
-
-        for idx, (col_name, transform) in col_map.items():
-            if idx < len(metrics) and metrics[idx] is not None:
-                values[col_name] = transform(metrics[idx])
-
-        # Compute gradient_pct = Δaltitude / Δhorizontal_distance × 100
-        # Primary: use cumulative distance if available
-        # Fallback: derive horizontal distance from pace (min/km) × Δt (1s per point)
-        gradient_pct = None
-        alt  = values["altitude"]
-        dist = values["distance"]
-        pace = values["pace"]   # min/km
-
-        if alt is not None and prev_altitude is not None:
-            d_alt = alt - prev_altitude
-            d_dist = None
-            if dist is not None and prev_distance is not None:
-                d_dist = dist - prev_distance
-            elif pace is not None and pace > 0:
-                # pace in min/km → speed in m/s = 1000 / (pace × 60)
-                speed_ms = 1000.0 / (pace * 60.0)
-                d_dist = speed_ms * 1.0   # 1-second intervals
-            if d_dist is not None and d_dist > 0.5:
-                gradient_pct = round(d_alt / d_dist * 100, 2)
-
-        if alt  is not None: prev_altitude = alt
-        if dist is not None: prev_distance = dist
-
-        cursor.execute(sql_insert, (
-            workout_id,
-            metric_timestamp,
-            values["heart_rate"],
-            values["pace"],
-            values["cadence"],
-            values["vertical_oscillation"],
-            values["vertical_ratio"],
-            values["ground_contact_time"],
-            values["power"],
-            values["latitude"],
-            values["longitude"],
-            values["altitude"],
-            values["distance"],
-            gradient_pct,
-        ))
-        rows_inserted += 1
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print(f"Inserted {rows_inserted} metric records for workout_id {workout_id}.")
+    except Exception as e:
+        print(f"Error collecting workout metrics: {e}")
+        return False
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    from okgarmin_connection import get_garmin_client, reset_garmin_client
+
+
+    async def main():
+        async with AsyncSessionLocal() as db:
+            await collect_workout_metrics(db, user_id=1, client=get_garmin_client())
+
+    asyncio.run(main())

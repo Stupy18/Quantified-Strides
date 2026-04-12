@@ -5,15 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
 from db.session import AsyncSessionLocal
-from ingestion.okgarmin_connection import get_garmin_client
+from ingestion.okgarmin_connection import get_garmin_client, reset_garmin_client
 from repos.sleep_repo import SleepRepo
 
 
 async def collect_sleep_data(db: AsyncSession, user_id: int):
-    client = get_garmin_client()
     today_date_str = datetime.today().strftime("%Y-%m-%d")
     today_date = datetime.strptime(today_date_str, "%Y-%m-%d").date()
     print(today_date_str)
+    try:
+        client = get_garmin_client()
+        data = client.get_sleep_data(today_date_str)
+    except garminconnect.GarminConnectAuthenticationError:#Restarts the Garmin client if connection fails
+        client = reset_garmin_client()
+        data = client.get_sleep_data(today_date_str)
 
     repo = SleepRepo(db)
 
@@ -22,7 +27,7 @@ async def collect_sleep_data(db: AsyncSession, user_id: int):
         print(f"Sleep data for {today_date_str} already recorded. Skipping.")
         return
 
-    sleep_data = client.get_sleep_data(today_date_str)
+
     sleep_dto = sleep_data.get("dailySleepDTO", {})
 
     deep_sleep_sec  = sleep_dto.get("deepSleepSeconds")  or 0
