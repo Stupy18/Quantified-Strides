@@ -2,13 +2,7 @@
 StrengthService
 
 Strength session list/detail, 1RM progression, and exercise library.
-All queries are async SQLAlchemy.
 """
-
-from datetime import date
-
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.strength import (
     ExerciseCreateSchema,
@@ -21,6 +15,7 @@ from models.strength import (
     StrengthSetSchema,
     StrengthWorkoutSchema,
 )
+from repos.strength_repo import StrengthRepo
 
 
 class StrengthService:
@@ -30,35 +25,9 @@ class StrengthService:
     # ------------------------------------------------------------------
 
     async def list_garmin_sessions(
-        self, db: AsyncSession, user_id: int, days: int = 90
+        self, repo: StrengthRepo, user_id: int, days: int = 90
     ) -> list[StrengthWorkoutSchema]:
-        result = await db.execute(text("""
-            SELECT
-                w.workout_id,
-                w.workout_date,
-                w.start_time,
-                w.end_time,
-                w.calories_burned,
-                ss.session_id,
-                ss.session_type,
-                COUNT(DISTINCT se.exercise_id) AS total_exercises,
-                COUNT(st.set_id)               AS total_sets
-            FROM workouts w
-            LEFT JOIN strength_sessions ss
-                   ON ss.user_id = w.user_id
-                  AND ss.session_date = w.workout_date
-            LEFT JOIN strength_exercises se ON se.session_id = ss.session_id
-            LEFT JOIN strength_sets st      ON st.exercise_id = se.exercise_id
-            WHERE w.user_id = :user_id
-              AND w.sport = 'strength_training'
-              AND w.workout_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
-            GROUP BY
-                w.workout_id, w.workout_date, w.start_time, w.end_time,
-                w.calories_burned, ss.session_id, ss.session_type
-            ORDER BY w.workout_date DESC
-        """), {"user_id": user_id, "days": days})
-
-        rows = result.fetchall()
+        rows = await repo.list_garmin_sessions(user_id, days)
         out = []
         for row in rows:
             duration = None
@@ -81,24 +50,9 @@ class StrengthService:
     # ------------------------------------------------------------------
 
     async def list_sessions(
-        self, db: AsyncSession, user_id: int, days: int = 90
+        self, repo: StrengthRepo, user_id: int, days: int = 90
     ) -> list[StrengthSessionListItemSchema]:
-        result = await db.execute(text("""
-            SELECT
-                ss.session_id,
-                ss.session_date,
-                ss.session_type,
-                COUNT(DISTINCT se.exercise_id) AS total_exercises,
-                COUNT(st.set_id)               AS total_sets
-            FROM strength_sessions ss
-            LEFT JOIN strength_exercises se ON se.session_id = ss.session_id
-            LEFT JOIN strength_sets st      ON st.exercise_id = se.exercise_id
-            WHERE ss.user_id = :user_id
-              AND ss.session_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
-            GROUP BY ss.session_id, ss.session_date, ss.session_type
-            ORDER BY ss.session_date DESC
-        """), {"user_id": user_id, "days": days})
-
+        rows = await repo.list_sessions(user_id, days)
         return [
             StrengthSessionListItemSchema(
                 session_id=row.session_id,
@@ -107,7 +61,7 @@ class StrengthService:
                 total_exercises=row.total_exercises,
                 total_sets=row.total_sets,
             )
-            for row in result.fetchall()
+            for row in rows
         ]
 
     # ------------------------------------------------------------------
@@ -115,19 +69,13 @@ class StrengthService:
     # ------------------------------------------------------------------
 
     async def get_session_detail(
-        self, db: AsyncSession, user_id: int, session_id: int
+        self, repo: StrengthRepo, user_id: int, session_id: int
     ) -> StrengthSessionSchema | None:
-        result = await db.execute(text("""
-            SELECT session_id, session_date, session_type, raw_notes
-            FROM strength_sessions
-            WHERE session_id = :session_id AND user_id = :user_id
-        """), {"session_id": session_id, "user_id": user_id})
-
-        row = result.fetchone()
+        row = await repo.get_session(user_id, session_id)
         if not row:
             return None
 
-        exercises = await self._get_exercises(db, session_id)
+        exercises = await self._get_exercises(repo, session_id)
 
         return StrengthSessionSchema(
             session_id=row.session_id,
@@ -138,18 +86,11 @@ class StrengthService:
         )
 
     async def _get_exercises(
-        self, db: AsyncSession, session_id: int
+        self, repo: StrengthRepo, session_id: int
     ) -> list[StrengthExerciseSchema]:
-        result = await db.execute(text("""
-            SELECT exercise_id, exercise_order, name, notes
-            FROM strength_exercises
-            WHERE session_id = :session_id
-            ORDER BY exercise_order
-        """), {"session_id": session_id})
-
         exercises = []
-        for row in result.fetchall():
-            sets = await self._get_sets(db, row.exercise_id)
+        for row in await repo.get_exercises(session_id):
+            sets = await self._get_sets(repo, row.exercise_id)
             exercises.append(StrengthExerciseSchema(
                 exercise_id=row.exercise_id,
                 exercise_order=row.exercise_order,
@@ -160,18 +101,8 @@ class StrengthService:
         return exercises
 
     async def _get_sets(
-        self, db: AsyncSession, exercise_id: int
+        self, repo: StrengthRepo, exercise_id: int
     ) -> list[StrengthSetSchema]:
-        result = await db.execute(text("""
-            SELECT
-                set_id, set_number, reps, reps_min, reps_max,
-                duration_seconds, weight_kg, is_bodyweight, band_color,
-                per_hand, per_side, plus_bar, weight_includes_bar, total_weight_kg
-            FROM strength_sets
-            WHERE exercise_id = :exercise_id
-            ORDER BY set_number
-        """), {"exercise_id": exercise_id})
-
         return [
             StrengthSetSchema(
                 set_id=row.set_id,
@@ -189,7 +120,7 @@ class StrengthService:
                 weight_includes_bar=row.weight_includes_bar or False,
                 total_weight_kg=row.total_weight_kg,
             )
-            for row in result.fetchall()
+            for row in await repo.get_sets(exercise_id)
         ]
 
     # ------------------------------------------------------------------
@@ -197,190 +128,87 @@ class StrengthService:
     # ------------------------------------------------------------------
 
     async def create_session(
-        self, db: AsyncSession, user_id: int, payload: StrengthSessionCreateSchema
+        self, repo: StrengthRepo, user_id: int, payload: StrengthSessionCreateSchema
     ) -> StrengthSessionSchema:
-        # Upsert session (one per user per date)
-        result = await db.execute(text("""
-            INSERT INTO strength_sessions (user_id, session_date, session_type, raw_notes)
-            VALUES (:user_id, :session_date, :session_type, :raw_notes)
-            ON CONFLICT (user_id, session_date) DO UPDATE SET
-                session_type = EXCLUDED.session_type,
-                raw_notes    = EXCLUDED.raw_notes
-            RETURNING session_id
-        """), {
-            "user_id": user_id,
-            "session_date": payload.session_date,
-            "session_type": payload.session_type,
-            "raw_notes": payload.raw_notes,
-        })
-        session_id = result.fetchone().session_id
-
-        # Replace exercises
-        await db.execute(text(
-            "DELETE FROM strength_exercises WHERE session_id = :sid"
-        ), {"sid": session_id})
+        session_id = await repo.upsert_session(
+            user_id, payload.session_date, payload.session_type, payload.raw_notes
+        )
+        await repo.delete_exercises(session_id)
 
         for ex in payload.exercises:
-            ex_result = await db.execute(text("""
-                INSERT INTO strength_exercises (session_id, exercise_order, name, notes)
-                VALUES (:sid, :order, :name, :notes)
-                RETURNING exercise_id
-            """), {
-                "sid": session_id,
-                "order": ex.exercise_order,
-                "name": ex.name,
-                "notes": ex.notes,
-            })
-            exercise_id = ex_result.fetchone().exercise_id
-
+            exercise_id = await repo.insert_session_exercise(
+                session_id, ex.exercise_order, ex.name, ex.notes
+            )
             for s in ex.sets:
-                await db.execute(text("""
-                    INSERT INTO strength_sets (
-                        exercise_id, set_number, reps, duration_seconds,
-                        weight_kg, is_bodyweight, band_color,
-                        per_hand, per_side, plus_bar,
-                        weight_includes_bar, total_weight_kg
-                    ) VALUES (
-                        :exercise_id, :set_number, :reps, :duration_seconds,
-                        :weight_kg, :is_bodyweight, :band_color,
-                        :per_hand, :per_side, :plus_bar,
-                        :weight_includes_bar, :total_weight_kg
-                    )
-                """), {
-                    "exercise_id": exercise_id,
-                    "set_number": s.set_number,
-                    "reps": s.reps,
-                    "duration_seconds": s.duration_seconds,
-                    "weight_kg": s.weight_kg,
-                    "is_bodyweight": s.is_bodyweight,
-                    "band_color": s.band_color,
-                    "per_hand": s.per_hand,
-                    "per_side": s.per_side,
-                    "plus_bar": s.plus_bar,
+                await repo.insert_set(exercise_id, {
+                    "set_number":          s.set_number,
+                    "reps":                s.reps,
+                    "duration_seconds":    s.duration_seconds,
+                    "weight_kg":           s.weight_kg,
+                    "is_bodyweight":       s.is_bodyweight,
+                    "band_color":          s.band_color,
+                    "per_hand":            s.per_hand,
+                    "per_side":            s.per_side,
+                    "plus_bar":            s.plus_bar,
                     "weight_includes_bar": s.weight_includes_bar,
-                    "total_weight_kg": s.total_weight_kg,
+                    "total_weight_kg":     s.total_weight_kg,
                 })
 
-        await db.commit()
-        return await self.get_session_detail(db, user_id, session_id)
+        await repo.db.commit()
+        return await self.get_session_detail(repo, user_id, session_id)
 
     # ------------------------------------------------------------------
     # 1RM progression (Epley formula)
     # ------------------------------------------------------------------
 
     async def get_1rm_history(
-        self,
-        db: AsyncSession,
-        user_id: int,
-        exercise_name: str,
-        days: int = 365,
+        self, repo: StrengthRepo, user_id: int, exercise_name: str, days: int = 365
     ) -> list[OneRMPointSchema]:
-        result = await db.execute(text("""
-            SELECT
-                ss.session_date,
-                MAX(
-                    st.total_weight_kg * (1.0 + st.reps / 30.0)
-                ) AS epley_1rm
-            FROM strength_sessions ss
-            JOIN strength_exercises se ON se.session_id = ss.session_id
-            JOIN strength_sets st      ON st.exercise_id = se.exercise_id
-            WHERE ss.user_id = :user_id
-              AND LOWER(se.name) = LOWER(:exercise_name)
-              AND st.reps IS NOT NULL AND st.reps > 0
-              AND st.total_weight_kg IS NOT NULL AND st.total_weight_kg > 0
-              AND ss.session_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
-            GROUP BY ss.session_date
-            ORDER BY ss.session_date
-        """), {"user_id": user_id, "exercise_name": exercise_name, "days": days})
-
+        rows = await repo.get_1rm_history(user_id, exercise_name, days)
         return [
             OneRMPointSchema(
                 session_date=row.session_date,
                 epley_1rm=round(float(row.epley_1rm), 1),
             )
-            for row in result.fetchall()
+            for row in rows
         ]
 
-    async def get_tracked_exercises(
-        self, db: AsyncSession, user_id: int
-    ) -> list[str]:
-        result = await db.execute(text("""
-            SELECT DISTINCT se.name
-            FROM strength_exercises se
-            JOIN strength_sessions ss ON ss.session_id = se.session_id
-            WHERE ss.user_id = :user_id
-            ORDER BY se.name
-        """), {"user_id": user_id})
-        return [row.name for row in result.fetchall()]
+    async def get_tracked_exercises(self, repo: StrengthRepo, user_id: int) -> list[str]:
+        return await repo.get_tracked_exercises(user_id)
 
     # ------------------------------------------------------------------
     # Exercise library
     # ------------------------------------------------------------------
 
     async def list_exercises(
-        self, db: AsyncSession, search: str | None = None
+        self, repo: StrengthRepo, search: str | None = None
     ) -> list[ExerciseSchema]:
-        query = """
-            SELECT
-                exercise_id, name, source, movement_pattern, quality_focus,
-                primary_muscles, secondary_muscles, equipment,
-                skill_level, bilateral, contraction_type,
-                systemic_fatigue, cns_load,
-                joint_stress, sport_carryover, goal_carryover, notes
-            FROM exercises
-        """
-        params: dict = {}
-        if search:
-            query += " WHERE LOWER(name) LIKE LOWER(:search)"
-            params["search"] = f"%{search}%"
-        query += " ORDER BY name"
-
-        result = await db.execute(text(query), params)
-        return [self._map_exercise(row) for row in result.fetchall()]
+        rows = await repo.list_exercises(search)
+        return [self._map_exercise(row) for row in rows]
 
     async def create_exercise(
-        self, db: AsyncSession, payload: ExerciseCreateSchema
+        self, repo: StrengthRepo, payload: ExerciseCreateSchema
     ) -> ExerciseSchema:
-        result = await db.execute(text("""
-            INSERT INTO exercises (
-                name, source, movement_pattern, quality_focus,
-                primary_muscles, secondary_muscles, equipment,
-                skill_level, bilateral, contraction_type,
-                systemic_fatigue, cns_load,
-                joint_stress, sport_carryover, goal_carryover, notes
-            ) VALUES (
-                :name, :source, :movement_pattern, :quality_focus,
-                :primary_muscles, :secondary_muscles, :equipment,
-                :skill_level, :bilateral, :contraction_type,
-                :systemic_fatigue, :cns_load,
-                :joint_stress, :sport_carryover, :goal_carryover, :notes
-            )
-            RETURNING
-                exercise_id, name, source, movement_pattern, quality_focus,
-                primary_muscles, secondary_muscles, equipment,
-                skill_level, bilateral, contraction_type,
-                systemic_fatigue, cns_load,
-                joint_stress, sport_carryover, goal_carryover, notes
-        """), {
-            "name": payload.name,
-            "source": payload.source,
+        row = await repo.create_exercise({
+            "name":             payload.name,
+            "source":           payload.source,
             "movement_pattern": payload.movement_pattern,
-            "quality_focus": payload.quality_focus,
-            "primary_muscles": payload.primary_muscles,
+            "quality_focus":    payload.quality_focus,
+            "primary_muscles":  payload.primary_muscles,
             "secondary_muscles": payload.secondary_muscles,
-            "equipment": payload.equipment,
-            "skill_level": payload.skill_level,
-            "bilateral": payload.bilateral,
+            "equipment":        payload.equipment,
+            "skill_level":      payload.skill_level,
+            "bilateral":        payload.bilateral,
             "contraction_type": payload.contraction_type,
             "systemic_fatigue": payload.systemic_fatigue,
-            "cns_load": payload.cns_load,
-            "joint_stress": payload.joint_stress,
-            "sport_carryover": payload.sport_carryover,
-            "goal_carryover": payload.goal_carryover,
-            "notes": payload.notes,
+            "cns_load":         payload.cns_load,
+            "joint_stress":     payload.joint_stress,
+            "sport_carryover":  payload.sport_carryover,
+            "goal_carryover":   payload.goal_carryover,
+            "notes":            payload.notes,
         })
-        await db.commit()
-        return self._map_exercise(result.fetchone())
+        await repo.db.commit()
+        return self._map_exercise(row)
 
     def _map_exercise(self, row) -> ExerciseSchema:
         return ExerciseSchema(

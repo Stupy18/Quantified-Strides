@@ -7,15 +7,17 @@ the cache is empty or the underlying inputs have changed.
 """
 
 import hashlib
+import json
 from datetime import date
 
 import anthropic
-from sqlalchemy import text
 
 from models.dashboard import RecommendationSchema
 from ai.rag import retrieve
 from core.config import ANTHROPIC_API_KEY
-from sqlalchemy.ext.asyncio import AsyncSession
+from repos.knowledge_repo import KnowledgeRepo
+from repos.narrative_repo import NarrativeRepo
+from repos.user_repo import UserRepo
 
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -41,53 +43,22 @@ def _make_cache_key(rec: RecommendationSchema, context: dict, sports: str = "") 
         context.get("hrv_status") or "",
         str(context.get("sleep_score") or ""),
         str(context.get("readiness_overall") or ""),
-        sports,  # sport preferences must be part of the key
+        sports,
     ])
     return hashlib.sha256(parts.encode()).hexdigest()[:16]
 
 
-async def _get_cached(user_id: int, today: date, cache_key: str, db: AsyncSession) -> str | None:
-    result = await db.execute(
-        text("SELECT narrative FROM narrative_cache WHERE user_id = :uid AND date = :d AND cache_key = :k"),
-        {"uid": user_id, "d": today, "k": cache_key},
-    )
-    row = result.fetchone()
-    return row.narrative if row else None
-
-
-async def _store_cache(user_id: int, today: date, cache_key: str, narrative: str, db: AsyncSession) -> None:
-    await db.execute(
-        text("""
-            INSERT INTO narrative_cache (user_id, date, cache_key, narrative)
-            VALUES (:uid, :d, :k, :n)
-            ON CONFLICT (user_id, date) DO UPDATE
-                SET cache_key = EXCLUDED.cache_key,
-                    narrative  = EXCLUDED.narrative,
-                    created_at = NOW()
-        """),
-        {"uid": user_id, "d": today, "k": cache_key, "n": narrative},
-    )
-    await db.commit()
-
-
-async def _fetch_sports(user_id: int, db: AsyncSession) -> str:
-    import json as _json
+async def _fetch_sports(user_id: int, user_repo: UserRepo) -> str:
     try:
-        result = await db.execute(
-            text("SELECT primary_sports FROM user_profile WHERE user_id = :uid"),
-            {"uid": user_id},
-        )
-        row = result.fetchone()
-        if not row or not row[0]:
+        row = await user_repo.get_by_id(user_id)
+        if not row or not row.primary_sports:
             return ""
-        raw = row[0]
-        # asyncpg returns JSONB as a dict; psycopg2 returns it as a string — handle both
-        data = _json.loads(raw) if isinstance(raw, str) else raw
+        raw = row.primary_sports
+        data = json.loads(raw) if isinstance(raw, str) else raw
         if not data:
             return ""
         sports = sorted(data.items(), key=lambda x: x[1], reverse=True)
-        names = [_SPORT_NAMES.get(k, k) for k, v in sports if v >= 1]
-        return ", ".join(names)
+        return ", ".join(_SPORT_NAMES.get(k, k) for k, v in sports if v >= 1)
     except Exception:
         return ""
 
@@ -139,25 +110,24 @@ Rules:
 async def generate_narrative(
     rec: RecommendationSchema,
     context: dict,
-    db: AsyncSession,
+    user_repo: UserRepo,
+    narrative_repo: NarrativeRepo,
+    knowledge_repo: KnowledgeRepo,
     user_id: int = 1,
     today: date | None = None,
 ) -> str | None:
     if today is None:
         today = date.today()
     try:
-        # Sports must be fetched before cache check — they're part of the cache key
-        sports = await _fetch_sports(user_id, db)
+        sports    = await _fetch_sports(user_id, user_repo)
         cache_key = _make_cache_key(rec, context, sports)
 
-        # Return cached narrative if inputs haven't changed
-        cached = await _get_cached(user_id, today, cache_key, db)
+        cached = await narrative_repo.get_cached(user_id, today, cache_key)
         if cached:
             return cached
 
-        # Generate fresh narrative
         query  = _build_rag_query(rec, context)
-        chunks = await retrieve(query, db, k=4)
+        chunks = await retrieve(query, knowledge_repo, k=4)
         system = _build_system_prompt(chunks, sports)
 
         notes_str = ""
@@ -185,8 +155,7 @@ async def generate_narrative(
         )
         narrative = response.content[0].text.strip()
 
-        # Store in cache
-        await _store_cache(user_id, today, cache_key, narrative, db)
+        await narrative_repo.upsert_cache(user_id, today, cache_key, narrative)
         return narrative
 
     except Exception:

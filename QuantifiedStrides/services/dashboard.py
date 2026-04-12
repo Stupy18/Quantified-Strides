@@ -27,6 +27,9 @@ from services.adapters.recovery import RecoveryService
 from services.adapters.alerts import AlertsService
 from services.adapters.recommendation import RecommendationService
 from ai.narrative import generate_narrative
+from repos.knowledge_repo import KnowledgeRepo
+from repos.narrative_repo import NarrativeRepo
+from repos.user_repo import UserRepo
 
 from db.session import get_connection
 from intelligence.recommend import get_last_nights_sleep, get_latest_weather, get_recent_load_by_sport
@@ -71,7 +74,15 @@ class DashboardService:
                 "sleep_score":       sleep_schema.score if sleep_schema else None,
                 "readiness_overall": readiness_raw.get("overall") if readiness_raw else None,
             }
-            rec_schema.narrative = await generate_narrative(rec_schema, narrative_context, db, user_id=user_id, today=today)
+            rec_schema.narrative = await generate_narrative(
+                rec_schema,
+                narrative_context,
+                user_repo=UserRepo(db),
+                narrative_repo=NarrativeRepo(db),
+                knowledge_repo=KnowledgeRepo(db),
+                user_id=user_id,
+                today=today,
+            )
 
         return DashboardSchema(
             date=today,

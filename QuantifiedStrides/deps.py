@@ -54,3 +54,23 @@ async def get_current_user_id(
 def get_user_repo(db: AsyncSession = Depends(get_db)):
     from repos.user_repo import UserRepo
     return UserRepo(db)
+
+
+def get_workout_repo(db: AsyncSession = Depends(get_db)):
+    from repos.workout_repo import WorkoutRepo
+    return WorkoutRepo(db)
+
+
+def get_strength_repo(db: AsyncSession = Depends(get_db)):
+    from repos.strength_repo import StrengthRepo
+    return StrengthRepo(db)
+
+
+def get_checkin_repo(db: AsyncSession = Depends(get_db)):
+    from repos.checkin_repo import CheckinRepo
+    return CheckinRepo(db)
+
+
+def get_sleep_repo(db: AsyncSession = Depends(get_db)):
+    from repos.sleep_repo import SleepRepo
+    return SleepRepo(db)

@@ -1,9 +1,8 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from deps import get_current_user_id, get_db
+from deps import get_checkin_repo, get_current_user_id
 from models.checkin import (
     DailyReadinessCreateSchema,
     DailyReadinessSchema,
@@ -13,6 +12,7 @@ from models.checkin import (
     WorkoutReflectionCreateSchema,
     WorkoutReflectionSchema,
 )
+from repos.checkin_repo import CheckinRepo
 from services.checkin import CheckinService
 
 router = APIRouter(prefix="/checkin", tags=["checkin"])
@@ -26,19 +26,19 @@ _svc = CheckinService()
 @router.post("/readiness", response_model=DailyReadinessSchema, status_code=201)
 async def create_readiness(
     payload: DailyReadinessCreateSchema,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    return await _svc.create_readiness(db, user_id, payload)
+    return await _svc.create_readiness(repo, user_id, payload)
 
 
 @router.get("/readiness/{entry_date}", response_model=DailyReadinessSchema)
 async def get_readiness(
     entry_date: date,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    result = await _svc.get_readiness(db, user_id, entry_date)
+    result = await _svc.get_readiness(repo, user_id, entry_date)
     if not result:
         raise HTTPException(status_code=404, detail="Readiness entry not found")
     return result
@@ -51,19 +51,19 @@ async def get_readiness(
 @router.post("/reflection", response_model=WorkoutReflectionSchema, status_code=201)
 async def create_reflection(
     payload: WorkoutReflectionCreateSchema,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    return await _svc.create_reflection(db, user_id, payload)
+    return await _svc.create_reflection(repo, user_id, payload)
 
 
 @router.get("/reflection/{entry_date}", response_model=WorkoutReflectionSchema)
 async def get_reflection(
     entry_date: date,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    result = await _svc.get_reflection(db, user_id, entry_date)
+    result = await _svc.get_reflection(repo, user_id, entry_date)
     if not result:
         raise HTTPException(status_code=404, detail="Workout reflection not found")
     return result
@@ -76,20 +76,19 @@ async def get_reflection(
 @router.post("/journal", response_model=JournalEntrySchema, status_code=201)
 async def upsert_journal(
     payload: JournalEntryCreateSchema,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    await _svc.ensure_journal_table(db)
-    return await _svc.upsert_journal(db, user_id, payload)
+    return await _svc.upsert_journal(repo, user_id, payload)
 
 
 @router.get("/journal/{entry_date}", response_model=JournalEntrySchema)
 async def get_journal(
     entry_date: date,
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    result = await _svc.get_journal(db, user_id, entry_date)
+    result = await _svc.get_journal(repo, user_id, entry_date)
     if not result:
         raise HTTPException(status_code=404, detail="Journal entry not found")
     return result
@@ -102,7 +101,7 @@ async def get_journal(
 @router.get("/history", response_model=list[JournalHistoryRowSchema])
 async def get_history(
     days: int = Query(default=90, ge=7, le=365),
-    db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    repo: CheckinRepo = Depends(get_checkin_repo),
 ):
-    return await _svc.get_history(db, user_id, days)
+    return await _svc.get_history(repo, user_id, days)
