@@ -10,12 +10,15 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
 
+import garminconnect
 from fastapi import APIRouter, Depends
 
 from deps import get_current_user_id, get_user_repo, AsyncSessionLocal
 from ingestion.environment import collect_environment_data
 from ingestion.sleep import collect_sleep_data
+from ingestion.workout import collect_workout_data
 from repos.user_repo import UserRepo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -49,24 +52,25 @@ async def _run(script: str, extra_env: dict) -> dict:
 
 @router.post("", status_code=200)
 async def trigger_sync(
+
     user_id: int = Depends(get_current_user_id),
     repo: UserRepo = Depends(get_user_repo),
 ):
-    creds = await repo.get_garmin_creds(user_id)
+
+
+
     results = []
 
-    workout = await _run("workout.py", creds)
-    results.append(workout)
-
-    if workout["ok"]:
-        results.append(await _run("workout_metrics.py", creds))
+    async with AsyncSessionLocal() as db:
+        await collect_workout_data(db, user_id)
+    results.append({"ok": True})
 
     async with AsyncSessionLocal() as db:
         await collect_sleep_data(db, user_id)
     results.append({"ok": True})
 
     async with AsyncSessionLocal() as db:
-        await collect_environment_data(db)
+        await collect_environment_data(db)  # no Garmin needed
     results.append({"ok": True})
 
     return {"ok": all(r["ok"] for r in results), "results": results}

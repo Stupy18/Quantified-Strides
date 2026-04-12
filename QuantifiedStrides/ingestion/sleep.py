@@ -5,14 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
 from db.session import AsyncSessionLocal
+from ingestion.okgarmin_connection import get_garmin_client
 from repos.sleep_repo import SleepRepo
 
 
 async def collect_sleep_data(db: AsyncSession, user_id: int):
-    # 1) Connect to Garmin
-    client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-    client.login()
-
+    client = get_garmin_client()
     today_date_str = datetime.today().strftime("%Y-%m-%d")
     today_date = datetime.strptime(today_date_str, "%Y-%m-%d").date()
     print(today_date_str)
