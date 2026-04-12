@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 
 from deps import get_current_user_id, get_user_repo, AsyncSessionLocal
 from ingestion.environment import collect_environment_data
+from ingestion.sleep import collect_sleep_data
 from repos.user_repo import UserRepo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -44,6 +45,8 @@ async def _run(script: str, extra_env: dict) -> dict:
     }
 
 
+
+
 @router.post("", status_code=200)
 async def trigger_sync(
     user_id: int = Depends(get_current_user_id),
@@ -58,9 +61,10 @@ async def trigger_sync(
     if workout["ok"]:
         results.append(await _run("workout_metrics.py", creds))
 
-    results.append(await _run("sleep.py", creds))
+    async with AsyncSessionLocal() as db:
+        await collect_sleep_data(db, user_id)
+    results.append({"ok": True})
 
-    # Direct async call instead of subprocess
     async with AsyncSessionLocal() as db:
         await collect_environment_data(db)
     results.append({"ok": True})

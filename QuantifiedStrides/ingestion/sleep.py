@@ -1,95 +1,75 @@
 from datetime import datetime
 
 import garminconnect
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import GARMIN_EMAIL, GARMIN_PASSWORD
-from db.session import get_connection
+from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
+from db.session import AsyncSessionLocal
+from repos.sleep_repo import SleepRepo
 
-# 1) Connect to Garmin
-client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-client.login()
 
-conn = get_connection()
-cursor = conn.cursor()
-print("Cursor connected")
+async def collect_sleep_data(db: AsyncSession, user_id: int):
+    # 1) Connect to Garmin
+    client = garminconnect.Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
+    client.login()
 
-today_date_str = datetime.today().strftime("%Y-%m-%d")
-today_date = datetime.strptime(today_date_str, "%Y-%m-%d").date()
-print(today_date_str)
+    today_date_str = datetime.today().strftime("%Y-%m-%d")
+    today_date = datetime.strptime(today_date_str, "%Y-%m-%d").date()
+    print(today_date_str)
 
-# Guard: skip if sleep data for today is already recorded
-cursor.execute(
-    "SELECT sleep_id FROM sleep_sessions WHERE user_id = 1 AND sleep_date = %s",
-    (today_date,)
-)
-if cursor.fetchone():
-    print(f"Sleep data for {today_date_str} already recorded. Skipping.")
-    cursor.close()
-    conn.close()
-    raise SystemExit(0)
+    repo = SleepRepo(db)
 
-sleep_data = client.get_sleep_data(today_date_str)
+    # Guard: skip if sleep data for today is already recorded
+    if await repo.exists_for_date(user_id, today_date):
+        print(f"Sleep data for {today_date_str} already recorded. Skipping.")
+        return
 
-sql_insert = """
-INSERT INTO sleep_sessions (
-      user_id
-    , sleep_date
-    , duration_minutes
-    , sleep_score
-    , hrv
-    , rhr
-    , time_in_deep
-    , time_in_light
-    , time_in_rem
-    , time_awake
-    , avg_sleep_stress
-    , sleep_score_feedback
-    , sleep_score_insight
-    , overnight_hrv
-    , hrv_status
-    , body_battery_change
-)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-"""
+    sleep_data = client.get_sleep_data(today_date_str)
+    sleep_dto = sleep_data.get("dailySleepDTO", {})
 
-sleep_dto = sleep_data.get("dailySleepDTO", {})
+    deep_sleep_sec  = sleep_dto.get("deepSleepSeconds")  or 0
+    light_sleep_sec = sleep_dto.get("lightSleepSeconds") or 0
+    rem_sleep_sec   = sleep_dto.get("remSleepSeconds")   or 0
+    awake_sleep_sec = sleep_dto.get("awakeSleepSeconds") or 0
 
-deep_sleep_sec  = sleep_dto.get("deepSleepSeconds")  or 0
-light_sleep_sec = sleep_dto.get("lightSleepSeconds") or 0
-rem_sleep_sec   = sleep_dto.get("remSleepSeconds")   or 0
-awake_sleep_sec = sleep_dto.get("awakeSleepSeconds") or 0
+    duration_minutes = (deep_sleep_sec + light_sleep_sec + rem_sleep_sec + awake_sleep_sec) // 60
 
-duration_minutes = (deep_sleep_sec + light_sleep_sec + rem_sleep_sec + awake_sleep_sec) // 60
+    sleep_score    = sleep_dto.get("sleepScores", {}).get("overall", {}).get("value")
+    hrv            = sleep_data.get("avgOvernightHrv")
+    rhr            = sleep_data.get("restingHeartRate")
+    avg_stress     = sleep_dto.get("avgSleepStress")
+    feedback       = sleep_dto.get("sleepScoreFeedback", "")
+    insight        = sleep_dto.get("sleepScoreInsight", "")
+    hrv_status     = sleep_data.get("hrvStatus", "")
+    battery_change = sleep_data.get("bodyBatteryChange")
 
-sleep_score    = sleep_dto.get("sleepScores", {}).get("overall", {}).get("value")
-hrv            = sleep_data.get("avgOvernightHrv")
-rhr            = sleep_data.get("restingHeartRate")
-avg_stress     = sleep_dto.get("avgSleepStress")
-feedback       = sleep_dto.get("sleepScoreFeedback", "")
-insight        = sleep_dto.get("sleepScoreInsight", "")
-hrv_status     = sleep_data.get("hrvStatus", "")
-battery_change = sleep_data.get("bodyBatteryChange")
+    data = {
+        "sleep_date":           today_date,
+        "duration_minutes":     duration_minutes,
+        "sleep_score":          float(sleep_score)    if sleep_score    else None,
+        "hrv":                  float(hrv)            if hrv            else None,
+        "rhr":                  int(rhr)              if rhr            else None,
+        "time_in_deep":         deep_sleep_sec  // 60,
+        "time_in_light":        light_sleep_sec // 60,
+        "time_in_rem":          rem_sleep_sec   // 60,
+        "time_awake":           awake_sleep_sec // 60,
+        "avg_sleep_stress":     float(avg_stress)     if avg_stress     else None,
+        "sleep_score_feedback": feedback,
+        "sleep_score_insight":  insight,
+        "overnight_hrv":        float(hrv)            if hrv            else None,
+        "hrv_status":           hrv_status,
+        "body_battery_change":  int(battery_change)   if battery_change else None,
+    }
 
-cursor.execute(sql_insert, (
-    1,  # user_id
-    today_date,
-    duration_minutes,
-    float(sleep_score) if sleep_score else None,
-    float(hrv) if hrv else None,
-    int(rhr) if rhr else None,
-    deep_sleep_sec // 60,
-    light_sleep_sec // 60,
-    rem_sleep_sec // 60,
-    awake_sleep_sec // 60,
-    float(avg_stress) if avg_stress else None,
-    feedback,
-    insight,
-    float(hrv) if hrv else None,
-    hrv_status,
-    int(battery_change) if battery_change else None,
-))
+    await repo.insert(user_id, data)
+    print(f"Inserted today's sleep data for {today_date_str} successfully!")
 
-conn.commit()
-cursor.close()
-conn.close()
-print(f"Inserted today's sleep data for {today_date_str} successfully!")
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        async with AsyncSessionLocal() as db:
+            await collect_sleep_data(db, user_id=1)
+
+    asyncio.run(main())
