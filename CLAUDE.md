@@ -12,7 +12,7 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 
 | Layer | Technology |
 |---|---|
-| Backend | FastAPI + asyncpg (PostgreSQL driver) |
+| Backend | FastAPI + SQLAlchemy async (asyncpg driver) |
 | Database | PostgreSQL (`quantifiedstrides`) via Docker (`pgvector/pgvector:pg16`) |
 | Frontend | React (Vite, port 5173) + shadcn/ui components |
 | Auth | JWT (HS256, 30-day expiry) + email verification via SMTP |
@@ -47,7 +47,7 @@ python environment.py
 
 ```
 main.py               # FastAPI app, CORS, router registration
-deps.py               # FastAPI Depends: get_db(), get_current_user()
+deps.py               # FastAPI Depends: get_db(), get_current_user_id(), repo factories
 core/
   settings.py         # pydantic-settings config (DB, JWT, SMTP, Anthropic key)
   config.py           # env var loader (.env) for ingestion pipeline (Garmin, OpenWeather)
@@ -60,6 +60,15 @@ api/v1/
   checkin.py          # daily readiness + post-workout reflection
   running.py          # running biomechanics analytics
   sync.py             # POST /sync/garmin — triggers Garmin pipeline
+repos/                # repository layer — all SQL lives here, injected via FastAPI Depends
+  user_repo.py        # users + user_profile queries
+  workout_repo.py     # workouts + workout_metrics queries
+  strength_repo.py    # strength_sessions, strength_exercises, strength_sets, exercises queries
+  sleep_repo.py       # sleep_sessions queries
+  checkin_repo.py     # daily_readiness, workout_reflection, journal_entries queries
+  environment_repo.py # environment_data queries
+  knowledge_repo.py   # pgvector similarity search on knowledge_chunks
+  narrative_repo.py   # narrative_cache get/upsert
 services/
   auth.py             # JWT issue/verify, password hash, email verification
   email.py            # SMTP email sending
@@ -120,7 +129,7 @@ cli/
 
 ```
 db/
-  session.py            # SQLAlchemy async session + engine setup
+  session.py            # psycopg2 get_connection() — used only by intelligence/ (pending migration)
   schema.sql            # canonical PostgreSQL schema
 ```
 
@@ -178,7 +187,9 @@ api/
 
 ```
 main.py                 # FastAPI app entry point (imports app from routers, registers middleware)
-deps.py                 # shared FastAPI dependencies (get_db, get_current_user)
+deps.py                 # shared FastAPI dependencies: get_db(), get_current_user_id(),
+                        # repo factories (get_user_repo, get_workout_repo, get_strength_repo,
+                        # get_checkin_repo, get_sleep_repo) — all injected via Depends()
 requirements.txt
 docker-compose.yml
 .env / .env.example
@@ -316,12 +327,15 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - pgvector RAG knowledge base (`knowledge_chunks` table + `ai/rag.py`); coaching transcripts in `knowledge/`
 - Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
 - `workout_metrics` time-series seeded with real data; `exercises` table seeded (~797 exercises)
+- **Repository layer** (`repos/`): all SQL centralized into 8 domain repos injected via FastAPI `Depends`. Services accept repo instances; no raw SQL in services or API handlers. `knowledge_repo` and `narrative_repo` instantiated directly at call sites (no factory needed).
 
 ## What's Half-Built
 
 - **Exercise suggestions on Dashboard** — recommendation engine outputs them, Dashboard UI doesn't display them yet
 - **Goal-based recommendation differentiation** — athlete vs strength vs hypertrophy logic not fully separated
 - **workout_metrics API ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; live ingestion on Garmin sync not fully wired
+- **Intelligence layer still on psycopg2** — `intelligence/training_load.py`, `recovery.py`, `alerts.py`, `recommend.py`, `analytics/` use psycopg2 directly (via `db/session.py` `get_connection()`); bridged to async API via `asyncio.to_thread()` in `services/adapters/`. Migration to async SQLAlchemy + repos is the next infra task.
+- **Ingestion scripts still on psycopg2** — `ingestion/workout.py`, `sleep.py`, `environment.py`, `workout_metrics.py` use psycopg2; pending migration to repos.
 
 ## What Doesn't Exist Yet
 
