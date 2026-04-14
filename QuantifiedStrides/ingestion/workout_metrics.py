@@ -4,6 +4,7 @@ import garminconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import AsyncSessionLocal
+from ingestion.okgarmin_connection import get_garmin_client, reset_garmin_client
 from repos.workout_repo import WorkoutRepo
 
 
@@ -68,13 +69,12 @@ def build_column_map(descriptors):
     return col_map
 
 
-async def collect_workout_metrics(db: AsyncSession, user_id: int) -> bool:
+async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garminconnect.Garmin) -> bool:
     try:
         repo = WorkoutRepo(db)
         try:
-            client = get_garmin_client()
             activities = client.get_activities(0, 1)
-        except garminconnect.GarminConnectAuthenticationError:  # Restarts the Garmin client if connection fails
+        except garminconnect.GarminConnectAuthenticationError:  # token expired mid-session
             client = reset_garmin_client()
             activities = client.get_activities(0, 1)
 
@@ -211,8 +211,6 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int) -> bool:
 
 if __name__ == "__main__":
     import asyncio
-    from okgarmin_connection import get_garmin_client, reset_garmin_client
-
 
     async def main():
         async with AsyncSessionLocal() as db:

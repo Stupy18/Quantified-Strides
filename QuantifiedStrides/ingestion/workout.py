@@ -3,19 +3,16 @@ from datetime import datetime, timedelta
 import garminconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
 from db.session import AsyncSessionLocal
 from ingestion.okgarmin_connection import get_garmin_client, reset_garmin_client
 from repos.workout_repo import WorkoutRepo
 
 
-async def collect_workout_data(db: AsyncSession, user_id: int):
+async def collect_workout_data(db: AsyncSession, user_id: int, client: garminconnect.Garmin):
     try:
-        # 1) Connect to Garmin
         try:
-            client = get_garmin_client()
             activities = client.get_activities(0, 1)
-        except garminconnect.GarminConnectAuthenticationError: #Restarts the Garmin client if connection fails
+        except garminconnect.GarminConnectAuthenticationError:  # token expired mid-session
             client = reset_garmin_client()
             activities = client.get_activities(0, 1)
 
@@ -95,6 +92,6 @@ if __name__ == "__main__":
 
     async def main():
         async with AsyncSessionLocal() as db:
-            await collect_workout_data(db, user_id=1)
+            await collect_workout_data(db, user_id=1, client=get_garmin_client())
 
     asyncio.run(main())

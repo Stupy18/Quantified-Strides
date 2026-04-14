@@ -3,20 +3,18 @@ from datetime import datetime
 import garminconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import GARMIN_EMAIL, GARMIN_PASSWORD
 from db.session import AsyncSessionLocal
 from ingestion.okgarmin_connection import get_garmin_client, reset_garmin_client
 from repos.sleep_repo import SleepRepo
 
 
-async def collect_sleep_data(db: AsyncSession, user_id: int):
+async def collect_sleep_data(db: AsyncSession, user_id: int, client: garminconnect.Garmin):
     today_date_str = datetime.today().strftime("%Y-%m-%d")
     today_date = datetime.strptime(today_date_str, "%Y-%m-%d").date()
     print(today_date_str)
     try:
-        client = get_garmin_client()
         data = client.get_sleep_data(today_date_str)
-    except garminconnect.GarminConnectAuthenticationError:#Restarts the Garmin client if connection fails
+    except garminconnect.GarminConnectAuthenticationError:  # token expired mid-session
         client = reset_garmin_client()
         data = client.get_sleep_data(today_date_str)
 
@@ -28,7 +26,7 @@ async def collect_sleep_data(db: AsyncSession, user_id: int):
         return
 
 
-    sleep_dto = sleep_data.get("dailySleepDTO", {})
+    sleep_dto = data.get("dailySleepDTO", {})
 
     deep_sleep_sec  = sleep_dto.get("deepSleepSeconds")  or 0
     light_sleep_sec = sleep_dto.get("lightSleepSeconds") or 0
@@ -38,13 +36,13 @@ async def collect_sleep_data(db: AsyncSession, user_id: int):
     duration_minutes = (deep_sleep_sec + light_sleep_sec + rem_sleep_sec + awake_sleep_sec) // 60
 
     sleep_score    = sleep_dto.get("sleepScores", {}).get("overall", {}).get("value")
-    hrv            = sleep_data.get("avgOvernightHrv")
-    rhr            = sleep_data.get("restingHeartRate")
+    hrv            = data.get("avgOvernightHrv")
+    rhr            = data.get("restingHeartRate")
     avg_stress     = sleep_dto.get("avgSleepStress")
     feedback       = sleep_dto.get("sleepScoreFeedback", "")
     insight        = sleep_dto.get("sleepScoreInsight", "")
-    hrv_status     = sleep_data.get("hrvStatus", "")
-    battery_change = sleep_data.get("bodyBatteryChange")
+    hrv_status     = data.get("hrvStatus", "")
+    battery_change = data.get("bodyBatteryChange")
 
     data = {
         "sleep_date":           today_date,
@@ -73,6 +71,6 @@ if __name__ == "__main__":
 
     async def main():
         async with AsyncSessionLocal() as db:
-            await collect_sleep_data(db, user_id=1)
+            await collect_sleep_data(db, user_id=1, client=get_garmin_client())
 
     asyncio.run(main())
