@@ -78,25 +78,20 @@ def get_metrics(cur, today, lookback=120, user_id=1):
     k_atl = 1 / 7
     ctl = 0.0
     atl = 0.0
+    ctl_7ago = 0.0
+    today_load = 0.0
+    cutoff_7ago = today - timedelta(days=7)
 
     d = today - timedelta(days=lookback)
     while d <= today:
         load = _trimp_for_date(cur, d, user_id)
         ctl  = ctl * (1 - k_ctl) + load * k_ctl
         atl  = atl * (1 - k_atl) + load * k_atl
-        d   += timedelta(days=1)
-
-    # Ramp rate: CTL today vs CTL 7 days ago
-    ctl_7ago = 0.0
-    atl_7ago = 0.0
-    d = today - timedelta(days=lookback)
-    while d <= today - timedelta(days=7):
-        load    = _trimp_for_date(cur, d, user_id)
-        ctl_7ago = ctl_7ago * (1 - k_ctl) + load * k_ctl
-        atl_7ago = atl_7ago * (1 - k_atl) + load * k_atl
+        if d == cutoff_7ago:
+            ctl_7ago = ctl
+        if d == today:
+            today_load = load
         d += timedelta(days=1)
-
-    today_load = _trimp_for_date(cur, today, user_id)
 
     return {
         "ctl":        round(ctl, 1),
