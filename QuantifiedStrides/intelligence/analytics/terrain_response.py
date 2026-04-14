@@ -52,7 +52,7 @@ def _band_for(gradient_pct: float) -> str:
     return "flat"
 
 
-def get_hr_gradient_curve(days: int = 365, sport: str = "running", conn=None) -> list[dict]:
+def get_hr_gradient_curve(days: int = 365, sport: str = "running", conn=None, user_id: int = 1) -> list[dict]:
     """
     Aggregate HR and pace across all running workouts by gradient band.
 
@@ -74,14 +74,14 @@ def get_hr_gradient_curve(days: int = 365, sport: str = "running", conn=None) ->
         SELECT wm.heart_rate, wm.pace, wm.gradient_pct
         FROM workout_metrics wm
         JOIN workouts w ON w.workout_id = wm.workout_id
-        WHERE w.user_id = 1
+        WHERE w.user_id = %s
           AND w.sport = %s
           AND w.workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
           AND wm.heart_rate IS NOT NULL AND wm.heart_rate > 40
           AND wm.pace IS NOT NULL AND wm.pace > 0 AND wm.pace < 20
           AND wm.gradient_pct IS NOT NULL
           AND wm.gradient_pct BETWEEN -30 AND 30
-    """, (sport, days))
+    """, (user_id, sport, days))
     rows = cur.fetchall()
 
     if close:
@@ -223,7 +223,7 @@ def get_elevation_hr_decoupling(workout_id: int, conn=None) -> Optional[dict]:
 # Grade cost model: HR per 1% grade increase (linear fit)
 # ---------------------------------------------------------------------------
 
-def get_grade_cost_model(days: int = 365, sport: str = "running", conn=None) -> Optional[dict]:
+def get_grade_cost_model(days: int = 365, sport: str = "running", conn=None, user_id: int = 1) -> Optional[dict]:
     """
     Fit a linear model: HR ~ α + β × gradient_pct  (at matched pace bands).
 
@@ -246,14 +246,14 @@ def get_grade_cost_model(days: int = 365, sport: str = "running", conn=None) -> 
         SELECT wm.heart_rate, wm.pace, wm.gradient_pct
         FROM workout_metrics wm
         JOIN workouts w ON w.workout_id = wm.workout_id
-        WHERE w.user_id = 1
+        WHERE w.user_id = %s
           AND w.sport = %s
           AND w.workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
           AND wm.heart_rate IS NOT NULL AND wm.heart_rate > 40
           AND wm.pace IS NOT NULL AND wm.pace > 0 AND wm.pace < 20
           AND wm.gradient_pct IS NOT NULL
           AND wm.gradient_pct BETWEEN -20 AND 20
-    """, (sport, days))
+    """, (user_id, sport, days))
     rows = cur.fetchall()
 
     if close:
@@ -308,7 +308,7 @@ def _minetti_cost_from_module(g: float) -> float:
 # Optimal gradient finder
 # ---------------------------------------------------------------------------
 
-def get_optimal_gradient(days: int = 365, sport: str = "running", conn=None) -> Optional[dict]:
+def get_optimal_gradient(days: int = 365, sport: str = "running", conn=None, user_id: int = 1) -> Optional[dict]:
     """
     At which gradient (in 2% buckets) is your speed:HR ratio highest?
     speed_per_hr = (1000 / pace_s) / heart_rate   (m/s per bpm)
@@ -324,14 +324,14 @@ def get_optimal_gradient(days: int = 365, sport: str = "running", conn=None) -> 
         SELECT wm.heart_rate, wm.pace, wm.gradient_pct
         FROM workout_metrics wm
         JOIN workouts w ON w.workout_id = wm.workout_id
-        WHERE w.user_id = 1
+        WHERE w.user_id = %s
           AND w.sport = %s
           AND w.workout_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
           AND wm.heart_rate IS NOT NULL AND wm.heart_rate > 40
           AND wm.pace IS NOT NULL AND wm.pace > 0 AND wm.pace < 20
           AND wm.gradient_pct IS NOT NULL
           AND wm.gradient_pct BETWEEN -20 AND 20
-    """, (sport, days))
+    """, (user_id, sport, days))
     rows = cur.fetchall()
 
     if close:
@@ -375,7 +375,7 @@ def get_optimal_gradient(days: int = 365, sport: str = "running", conn=None) -> 
 # Combined summary for Streamlit / notebooks
 # ---------------------------------------------------------------------------
 
-def get_terrain_summary(days: int = 365, conn=None) -> dict:
+def get_terrain_summary(days: int = 365, conn=None, user_id: int = 1, sport: str = "running") -> dict:
     """
     Returns all terrain response analytics as a single dict.
     Used by the Streamlit page and notebooks.
@@ -384,9 +384,9 @@ def get_terrain_summary(days: int = 365, conn=None) -> dict:
     if conn is None:
         conn = get_connection()
 
-    curve   = get_hr_gradient_curve(days=days, conn=conn)
-    model   = get_grade_cost_model(days=days,  conn=conn)
-    optimal = get_optimal_gradient(days=days,  conn=conn)
+    curve   = get_hr_gradient_curve(days=days, sport=sport, conn=conn, user_id=user_id)
+    model   = get_grade_cost_model(days=days,  sport=sport, conn=conn, user_id=user_id)
+    optimal = get_optimal_gradient(days=days,  sport=sport, conn=conn, user_id=user_id)
 
     if close:
         conn.close()

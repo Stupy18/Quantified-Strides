@@ -139,15 +139,15 @@ class RunningService:
     # ------------------------------------------------------------------
 
     async def get_terrain_summary(
-        self, days: int = 365, sport: str = "running"
+        self, days: int = 365, sport: str = "running", user_id: int = 1
     ) -> TerrainSummarySchema:
-        raw = await asyncio.to_thread(self._terrain_summary, days, sport)
+        raw = await asyncio.to_thread(self._terrain_summary, days, sport, user_id)
         return self._map_terrain(raw)
 
-    def _terrain_summary(self, days: int, sport: str) -> dict:
+    def _terrain_summary(self, days: int, sport: str, user_id: int = 1) -> dict:
         conn = get_connection()
         try:
-            return get_terrain_summary(days=days, conn=conn)
+            return get_terrain_summary(days=days, conn=conn, user_id=user_id, sport=sport)
         finally:
             conn.close()
 

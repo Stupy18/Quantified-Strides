@@ -36,7 +36,7 @@ async def get_terrain_summary(
     sport: str = Query(default="running", pattern="^(running|trail_running)$"),
     user_id: int = Depends(get_current_user_id),
 ):
-    return await _svc.get_terrain_summary(days, sport)
+    return await _svc.get_terrain_summary(days, sport, user_id)
 
 
 @router.get("/workouts/{workout_id}/gap", response_model=WorkoutGAPSchema)
