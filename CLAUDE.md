@@ -34,11 +34,12 @@ uvicorn main:app --reload --port 8000
 cd frontend && npm run dev
 # App: http://localhost:5173
 
-# Garmin sync (manual trigger)
-python workout.py
-python sleep.py
-python environment.py
-# or via API: POST /api/v1/sync/garmin
+# Garmin sync — primary path is via API
+# POST /api/v1/sync/garmin (frontend "Sync" button)
+# CLI fallback (each file has __main__ block):
+python ingestion/workout.py
+python ingestion/sleep.py
+python ingestion/environment.py
 ```
 
 ## Project Structure
@@ -110,16 +111,22 @@ intelligence/
 
 ```
 ingestion/
-  workout.py            # Garmin → workouts table
-  sleep.py              # Garmin → sleep_sessions table
-  environment.py        # OpenWeatherMap + Ambee → environment_data table
-  workout_metrics.py    # Garmin → workout_metrics time-series table
+  okgarmin_connection.py  # shared singleton Garmin client; token-cached at ~/.garmin_tokens
+                          # get_garmin_client() / reset_garmin_client() — used by all ingestion fns
+  workout.py            # collect_workout_data(db, user_id, client) → workouts table
+  sleep.py              # collect_sleep_data(db, user_id, client) → sleep_sessions table
+  environment.py        # collect_environment_data(db) → environment_data table
+                        # WARNING: hardcoded user_id=1 — not yet multi-user
+  workout_metrics.py    # collect_workout_metrics(db, user_id, client) → workout_metrics table
 ```
+
+All ingestion functions are async and accept an injected Garmin client. Primary invocation is via `POST /api/v1/sync/garmin`. Each file also has a `__main__` block for CLI fallback.
 
 ### CLI Tools — `cli/`
 
 ```
 cli/
+  main.py               # CLI entry point
   checkin.py            # morning readiness + post-workout reflection (terminal)
   daily_subjective.py   # daily subjective input CLI
   strength_log.py       # gym session logger (superseded by API, kept for terminal use)
@@ -149,6 +156,24 @@ scripts/
   populate_tables2.py        # seed script (extended)
   dump_tables.py             # dump table contents for inspection
   debug_sleep.py             # sleep data debug utility
+```
+
+### Tests — `tests/`
+
+```
+tests/
+  conftest.py, pytest.ini
+  test_config.py, test_db.py, test_environment.py, test_sleep.py,
+  test_strength_log.py, test_workout.py
+```
+
+### Docs & Samples
+
+```
+docs/
+  DECISIONS.md          # architecture decision records
+  *.plantuml            # DB schema + flow diagrams
+samples/                # raw Garmin API response samples + terrain curve visualization
 ```
 
 ### Knowledge Base — `knowledge/`
@@ -282,15 +307,17 @@ Narrative is **cached** keyed by sports preferences — cache busts when sport p
 3. `POST /api/v1/login` — returns JWT (30-day expiry)
 4. All protected routes: `Authorization: Bearer <token>` → `get_current_user()` extracts `user_id`
 
-**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services — the app is multi-user from the start.
+**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services. **Exception:** `ingestion/environment.py` currently hardcodes `user_id=1` — known bug, pending fix.
 
 ## Garmin Sync
 
 Two paths:
-1. **Manual scripts** (`workout.py`, `sleep.py`, `environment.py`) — run directly from terminal
-2. **API trigger** (`POST /api/v1/sync/garmin`) — frontend "Sync" button calls this
+1. **API trigger** (`POST /api/v1/sync/garmin`) — primary path; frontend "Sync" button
+2. **CLI fallback** — each ingestion file has a `__main__` block for direct execution
 
-Garmin credentials stored in `user_profile` table (per user), not in `.env`. The sync router fetches them at runtime.
+**Shared client**: `ingestion/okgarmin_connection.py` provides a singleton `get_garmin_client()` with token caching at `~/.garmin_tokens`. Auth errors trigger `reset_garmin_client()` and re-login.
+
+**Garmin credentials**: currently loaded from `.env` via `core/config.py` (`GARMIN_EMAIL`, `GARMIN_PASSWORD`) — global, not per-user. Per-user credential storage in `user_profile` is the intended architecture but not yet implemented.
 
 **Deduplication**: `workouts` has `UNIQUE (user_id, start_time)` — re-running sync won't create duplicates.
 
@@ -333,9 +360,9 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 
 - **Exercise suggestions on Dashboard** — recommendation engine outputs them, Dashboard UI doesn't display them yet
 - **Goal-based recommendation differentiation** — athlete vs strength vs hypertrophy logic not fully separated
-- **workout_metrics API ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; live ingestion on Garmin sync not fully wired
+- **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
 - **Intelligence layer still on psycopg2** — `intelligence/training_load.py`, `recovery.py`, `alerts.py`, `recommend.py`, `analytics/` use psycopg2 directly (via `db/session.py` `get_connection()`); bridged to async API via `asyncio.to_thread()` in `services/adapters/`. Migration to async SQLAlchemy + repos is the next infra task.
-- **Ingestion scripts still on psycopg2** — `ingestion/workout.py`, `sleep.py`, `environment.py`, `workout_metrics.py` use psycopg2; pending migration to repos.
+- **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
 
 ## What Doesn't Exist Yet
 
