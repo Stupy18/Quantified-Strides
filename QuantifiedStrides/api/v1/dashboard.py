@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from deps import get_current_user_id, get_dashboard_service
 from models.dashboard import DashboardSchema
-from services.dashboard import DashboardService
+from services.dashboard_service import DashboardService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 

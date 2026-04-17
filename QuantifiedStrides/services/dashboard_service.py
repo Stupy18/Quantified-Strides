@@ -24,10 +24,10 @@ from models.dashboard import (
     WeatherSchema,
     ReadinessSummarySchema,
 )
-from services.adapters.training_load import TrainingLoadService
-from services.adapters.recovery import RecoveryService
-from services.adapters.alerts import AlertsService
-from services.adapters.recommendation import RecommendationService
+from services.intelligence.training_load_service import TrainingLoadService
+from services.intelligence.recovery_service import RecoveryService
+from services.intelligence.alerts_service import AlertsService
+from services.intelligence.recommendation_service import RecommendationService
 from ai.narrative import generate_narrative
 
 from repos.checkin_repo import CheckinRepo

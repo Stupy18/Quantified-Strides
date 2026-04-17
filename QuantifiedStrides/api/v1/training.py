@@ -12,7 +12,7 @@ from models.training import (
 )
 from repos.strength_repo import StrengthRepo
 from repos.workout_repo import WorkoutRepo
-from services.training import TrainingService
+from services.training_service import TrainingService
 
 router = APIRouter(prefix="/training", tags=["training"])
 _svc = TrainingService()

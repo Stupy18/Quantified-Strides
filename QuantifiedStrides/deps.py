@@ -15,7 +15,7 @@ from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from core.settings import settings
-from services.auth import decode_token
+from services.auth_service import decode_token
 
 engine = create_async_engine(
     settings.database_url,
@@ -85,10 +85,10 @@ def get_running_service(
     metrics_repo=Depends(get_workout_metrics_repo),
     workout_repo=Depends(get_workout_repo),
 ):
-    from services.running import RunningService
+    from services.running_service import RunningService
     return RunningService(metrics_repo, workout_repo)
 
 
 def get_dashboard_service(db: AsyncSession = Depends(get_db)):
-    from services.dashboard import DashboardService
+    from services.dashboard_service import DashboardService
     return DashboardService(db)

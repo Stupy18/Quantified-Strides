@@ -13,7 +13,7 @@ from models.checkin import (
     WorkoutReflectionSchema,
 )
 from repos.checkin_repo import CheckinRepo
-from services.checkin import CheckinService
+from services.checkin_service import CheckinService
 
 router = APIRouter(prefix="/checkin", tags=["checkin"])
 _svc = CheckinService()

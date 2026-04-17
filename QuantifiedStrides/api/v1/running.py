@@ -8,7 +8,7 @@ from models.running import (
     TerrainSummarySchema,
     WorkoutGAPSchema,
 )
-from services.running import RunningService
+from services.running_service import RunningService
 
 router = APIRouter(prefix="/running", tags=["running"])
 
