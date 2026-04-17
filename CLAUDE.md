@@ -62,28 +62,29 @@ api/v1/
   running.py          # running biomechanics analytics
   sync.py             # POST /sync/garmin — triggers Garmin pipeline
 repos/                # repository layer — all SQL lives here, injected via FastAPI Depends
-  user_repo.py        # users + user_profile queries
-  workout_repo.py     # workouts + workout_metrics queries
-  strength_repo.py    # strength_sessions, strength_exercises, strength_sets, exercises queries
-  sleep_repo.py       # sleep_sessions queries
-  checkin_repo.py     # daily_readiness, workout_reflection, journal_entries queries
-  environment_repo.py # environment_data queries
-  knowledge_repo.py   # pgvector similarity search on knowledge_chunks
-  narrative_repo.py   # narrative_cache get/upsert
+  user_repo.py             # users + user_profile queries
+  workout_repo.py          # workouts table queries + intelligence helpers
+  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain)
+  strength_repo.py         # strength_sessions, strength_exercises, strength_sets, exercises queries
+  sleep_repo.py            # sleep_sessions queries
+  checkin_repo.py          # daily_readiness, workout_reflection, journal_entries queries
+  environment_repo.py      # environment_data queries
+  knowledge_repo.py        # pgvector similarity search on knowledge_chunks
+  narrative_repo.py        # narrative_cache get/upsert
 services/
-  auth.py             # JWT issue/verify, password hash, email verification
-  email.py            # SMTP email sending
-  dashboard.py        # orchestrates all services into one dashboard payload
-  checkin.py          # readiness + reflection CRUD
-  strength.py         # strength session/exercise/set CRUD + 1RM
-  running.py          # running biomechanics computations
-  sleep.py            # sleep history queries
-  training.py         # workout history queries
-  adapters/           # thin async wrappers — bridge sync intelligence/ to async API
-    training_load.py  # asyncio.to_thread wrapper around intelligence.training_load
-    recovery.py       # asyncio.to_thread wrapper around intelligence.recovery
-    alerts.py         # asyncio.to_thread wrapper around intelligence.alerts
-    recommendation.py # asyncio.to_thread wrapper around intelligence.recommend
+  auth_service.py          # JWT issue/verify, password hash, email verification
+  email_service.py         # SMTP email sending
+  dashboard_service.py     # orchestrates all intelligence services into one dashboard payload
+  checkin_service.py       # readiness + reflection CRUD
+  strength_service.py      # strength session/exercise/set CRUD + 1RM
+  running_service.py       # running biomechanics computations
+  sleep_service.py         # sleep history queries
+  training_service.py      # workout history queries
+  intelligence/            # service wrappers around the intelligence layer
+    training_load_service.py  # injects repos into intelligence.training_load; maps to schema
+    recovery_service.py       # injects repos into intelligence.recovery; maps to schema
+    alerts_service.py         # injects repos into intelligence.alerts; maps to schema
+    recommendation_service.py # injects repos into intelligence.recommend; maps to schema
 ai/
   narrative.py        # Claude API call — RAG-grounded narrative, cached per user/day
   rag.py              # pgvector cosine similarity search for knowledge injection
@@ -136,7 +137,8 @@ cli/
 
 ```
 db/
-  session.py            # psycopg2 get_connection() — used only by intelligence/ (pending migration)
+  session.py            # psycopg2 get_connection() — used only by cli/ and scripts/
+                        # NOTE: also defines a stale async engine; canonical async engine lives in deps.py
   schema.sql            # canonical PostgreSQL schema
 ```
 
@@ -213,8 +215,10 @@ api/
 ```
 main.py                 # FastAPI app entry point (imports app from routers, registers middleware)
 deps.py                 # shared FastAPI dependencies: get_db(), get_current_user_id(),
-                        # repo factories (get_user_repo, get_workout_repo, get_strength_repo,
-                        # get_checkin_repo, get_sleep_repo) — all injected via Depends()
+                        # repo factories — get_user_repo, get_workout_repo, get_strength_repo,
+                        #   get_checkin_repo, get_sleep_repo, get_workout_metrics_repo
+                        # service factories — get_running_service, get_dashboard_service
+                        # all injected via Depends() per request
 requirements.txt
 docker-compose.yml
 .env / .env.example
@@ -352,17 +356,18 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - Profile: sport picker, training goal, gym days/week, Garmin credentials
 - Narrative cache (`narrative_cache` table) keyed by sports preferences — busts on profile change
 - pgvector RAG knowledge base (`knowledge_chunks` table + `ai/rag.py`); coaching transcripts in `knowledge/`
-- Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
+- Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running_service.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
 - `workout_metrics` time-series seeded with real data; `exercises` table seeded (~797 exercises)
-- **Repository layer** (`repos/`): all SQL centralized into 8 domain repos injected via FastAPI `Depends`. Services accept repo instances; no raw SQL in services or API handlers. `knowledge_repo` and `narrative_repo` instantiated directly at call sites (no factory needed).
+- **Repository layer** (`repos/`): all SQL centralized into 9 domain repos injected via FastAPI `Depends`. Services accept repo instances; no raw SQL in services or API handlers. `knowledge_repo` and `narrative_repo` instantiated directly at call sites (no factory needed).
+- **Intelligence layer fully async**: `intelligence/` modules (training_load, recovery, alerts, recommend, all analytics) use async SQLAlchemy via injected repos — no psycopg2, no `asyncio.to_thread`. Service wrappers live in `services/intelligence/`.
 
 ## What's Half-Built
 
 - **Exercise suggestions on Dashboard** — recommendation engine outputs them, Dashboard UI doesn't display them yet
 - **Goal-based recommendation differentiation** — athlete vs strength vs hypertrophy logic not fully separated
 - **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
-- **Intelligence layer still on psycopg2** — `intelligence/training_load.py`, `recovery.py`, `alerts.py`, `recommend.py`, `analytics/` use psycopg2 directly (via `db/session.py` `get_connection()`); bridged to async API via `asyncio.to_thread()` in `services/adapters/`. Migration to async SQLAlchemy + repos is the next infra task.
 - **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
+- **`db/session.py` stale async engine** — defines a second `create_async_engine` instance alongside the canonical one in `deps.py`; ingestion files use the `db/session` one. Should be consolidated so there is a single engine/pool.
 
 ## What Doesn't Exist Yet
 
