@@ -7,6 +7,7 @@ sleep, and weather — then outputs what to do today and why.
 CLI entry point has moved to cli/ — this module is the async API path only.
 """
 
+import json
 from datetime import timedelta
 
 from intelligence.training_load import tsb_intensity_hint
@@ -178,8 +179,7 @@ async def get_recent_load_by_sport(
     user_sports = {}
     if profile and profile.primary_sports:
         raw = profile.primary_sports
-        import json as _json
-        user_sports = _json.loads(raw) if isinstance(raw, str) else raw
+        user_sports = json.loads(raw) if isinstance(raw, str) else raw
 
     since = today - timedelta(days=days)
     rows  = await workout_repo.get_recent_sport_load(user_id, since, today)
