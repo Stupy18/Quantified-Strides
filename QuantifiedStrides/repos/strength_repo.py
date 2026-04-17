@@ -361,6 +361,33 @@ class StrengthRepo:
         )
         return result.fetchall()
 
+    async def get_muscle_importance(self):
+        """Primary muscles + sport carryover for all exercises (recommend.py)."""
+        result = await self.db.execute(
+            text("""
+                SELECT primary_muscles, sport_carryover
+                FROM exercises
+                WHERE primary_muscles IS NOT NULL AND sport_carryover IS NOT NULL
+            """)
+        )
+        return result.fetchall()
+
+    async def get_weekly_muscle_frequency(self, user_id: int, week_start: date, week_end: date):
+        """Distinct session_date + primary_muscles pairs in a week (recommend.py)."""
+        result = await self.db.execute(
+            text("""
+                SELECT DISTINCT ss.session_date, e.primary_muscles
+                FROM strength_sessions ss
+                JOIN strength_exercises se ON se.session_id = ss.session_id
+                JOIN exercises e           ON e.name = se.name
+                WHERE ss.user_id = :uid
+                  AND ss.session_date >= :week_start AND ss.session_date < :week_end
+                  AND e.primary_muscles IS NOT NULL
+            """),
+            {"uid": user_id, "week_start": week_start, "week_end": week_end},
+        )
+        return result.fetchall()
+
     # ── exercise library ───────────────────────────────────────────────────────
 
     async def list_exercises(self, search: str | None = None):

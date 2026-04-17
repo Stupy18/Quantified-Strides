@@ -1,16 +1,13 @@
 """
 RunningService
 
-Wraps the three sync analytics modules:
+Wraps the three analytics modules:
   analytics/running_economy.py  — GAP, aerobic decoupling, REI
   analytics/biomechanics.py     — fatigue signature, cadence-speed, longitudinal trends
   analytics/terrain_response.py — HR-gradient curve, grade cost model, optimal gradient
 
-All analytics functions are psycopg2-based and run in a thread pool via
-asyncio.to_thread so they never block the async event loop.
+All analytics functions are async; no thread-pool bridging needed.
 """
-
-import asyncio
 
 from models.running import (
     BiomechanicsTrendPointSchema,
@@ -25,7 +22,6 @@ from models.running import (
     WorkoutGAPSchema,
 )
 
-from db.session import get_connection
 from intelligence.analytics.running_economy import (
     get_running_trends,
     get_workout_gap,
@@ -35,16 +31,22 @@ from intelligence.analytics.terrain_response import (
     get_terrain_summary,
     get_elevation_hr_decoupling,
 )
+from repos.workout_metrics_repo import WorkoutMetricsRepo
+from repos.workout_repo import WorkoutRepo
 
 
 class RunningService:
+
+    def __init__(self, metrics_repo: WorkoutMetricsRepo, workout_repo: WorkoutRepo):
+        self.metrics_repo = metrics_repo
+        self.workout_repo = workout_repo
 
     # ------------------------------------------------------------------
     # Running economy trends (multi-workout)
     # ------------------------------------------------------------------
 
     async def get_running_trends(self, days: int = 365, user_id: int = 1) -> list[RunningTrendPointSchema]:
-        rows = await asyncio.to_thread(self._running_trends, days, user_id)
+        rows = await get_running_trends(self.metrics_repo, self.workout_repo, days=days, user_id=user_id)
         return [
             RunningTrendPointSchema(
                 workout_id=r["workout_id"],
@@ -64,19 +66,12 @@ class RunningService:
             for r in rows
         ]
 
-    def _running_trends(self, days: int, user_id: int = 1) -> list[dict]:
-        conn = get_connection()
-        try:
-            return get_running_trends(days=days, user_id=user_id, conn=conn)
-        finally:
-            conn.close()
-
     # ------------------------------------------------------------------
     # Single-workout: GAP
     # ------------------------------------------------------------------
 
     async def get_workout_gap(self, workout_id: int) -> WorkoutGAPSchema | None:
-        raw = await asyncio.to_thread(self._workout_gap, workout_id)
+        raw = await get_workout_gap(workout_id, self.metrics_repo)
         if not raw:
             return None
         return WorkoutGAPSchema(
@@ -94,19 +89,12 @@ class RunningService:
             rows_used=raw["rows_used"],
         )
 
-    def _workout_gap(self, workout_id: int) -> dict | None:
-        conn = get_connection()
-        try:
-            return get_workout_gap(workout_id, conn)
-        finally:
-            conn.close()
-
     # ------------------------------------------------------------------
     # Biomechanics trends (multi-workout)
     # ------------------------------------------------------------------
 
     async def get_biomechanics_trends(self, days: int = 365, user_id: int = 1) -> list[BiomechanicsTrendPointSchema]:
-        rows = await asyncio.to_thread(self._biomechanics_trends, days, user_id)
+        rows = await get_biomechanics_trends(self.metrics_repo, self.workout_repo, days=days, user_id=user_id)
         return [
             BiomechanicsTrendPointSchema(
                 workout_id=r["workout_id"],
@@ -127,13 +115,6 @@ class RunningService:
             for r in rows
         ]
 
-    def _biomechanics_trends(self, days: int, user_id: int = 1) -> list[dict]:
-        conn = get_connection()
-        try:
-            return get_biomechanics_trends(days=days, user_id=user_id, conn=conn)
-        finally:
-            conn.close()
-
     # ------------------------------------------------------------------
     # Terrain response summary (multi-workout)
     # ------------------------------------------------------------------
@@ -141,15 +122,8 @@ class RunningService:
     async def get_terrain_summary(
         self, days: int = 365, sport: str = "running", user_id: int = 1
     ) -> TerrainSummarySchema:
-        raw = await asyncio.to_thread(self._terrain_summary, days, sport, user_id)
+        raw = await get_terrain_summary(self.metrics_repo, days=days, sport=sport, user_id=user_id)
         return self._map_terrain(raw)
-
-    def _terrain_summary(self, days: int, sport: str, user_id: int = 1) -> dict:
-        conn = get_connection()
-        try:
-            return get_terrain_summary(days=days, conn=conn, user_id=user_id, sport=sport)
-        finally:
-            conn.close()
 
     def _map_terrain(self, raw: dict) -> TerrainSummarySchema:
         curve = [
@@ -194,7 +168,7 @@ class RunningService:
     async def get_elevation_decoupling(
         self, workout_id: int
     ) -> ElevationHRDecouplingSchema | None:
-        raw = await asyncio.to_thread(self._elevation_decoupling, workout_id)
+        raw = await get_elevation_hr_decoupling(workout_id, self.metrics_repo)
         if not raw:
             return None
         return ElevationHRDecouplingSchema(
@@ -212,10 +186,3 @@ class RunningService:
                 for q in raw["quartiles"]
             ],
         )
-
-    def _elevation_decoupling(self, workout_id: int) -> dict | None:
-        conn = get_connection()
-        try:
-            return get_elevation_hr_decoupling(workout_id, conn)
-        finally:
-            conn.close()

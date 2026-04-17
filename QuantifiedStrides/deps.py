@@ -74,3 +74,21 @@ def get_checkin_repo(db: AsyncSession = Depends(get_db)):
 def get_sleep_repo(db: AsyncSession = Depends(get_db)):
     from repos.sleep_repo import SleepRepo
     return SleepRepo(db)
+
+
+def get_workout_metrics_repo(db: AsyncSession = Depends(get_db)):
+    from repos.workout_metrics_repo import WorkoutMetricsRepo
+    return WorkoutMetricsRepo(db)
+
+
+def get_running_service(
+    metrics_repo=Depends(get_workout_metrics_repo),
+    workout_repo=Depends(get_workout_repo),
+):
+    from services.running import RunningService
+    return RunningService(metrics_repo, workout_repo)
+
+
+def get_dashboard_service(db: AsyncSession = Depends(get_db)):
+    from services.dashboard import DashboardService
+    return DashboardService(db)

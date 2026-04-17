@@ -149,6 +149,55 @@ class WorkoutRepo:
         )
         return result.fetchone() is not None
 
+    async def get_running_workout_list(self, user_id: int, days: int = 365):
+        """Running/trail workouts ordered by date — used by analytics trends functions."""
+        result = await self.db.execute(
+            text("""
+                SELECT workout_id, workout_date, sport, training_volume,
+                       avg_heart_rate, normalized_power
+                FROM workouts
+                WHERE user_id = :uid
+                  AND sport IN ('running', 'trail_running')
+                  AND workout_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
+                ORDER BY workout_date
+            """),
+            {"uid": user_id, "days": days},
+        )
+        return result.fetchall()
+
+    async def get_training_dates(self, user_id: int, start: date, until: date) -> set:
+        """Set of all dates with any training activity — used by consecutive-days counter."""
+        result = await self.db.execute(
+            text("""
+                SELECT workout_date AS d FROM workouts
+                WHERE user_id = :uid AND workout_date BETWEEN :start AND :until
+                UNION
+                SELECT session_date FROM strength_sessions
+                WHERE user_id = :uid AND session_date BETWEEN :start AND :until
+            """),
+            {"uid": user_id, "start": start, "until": until},
+        )
+        return {row[0] for row in result.fetchall()}
+
+    async def get_endurance_fatigue_data(self, user_id: int, start: date, until: date):
+        """Per-sport session data for muscle fatigue decay (recovery.py)."""
+        result = await self.db.execute(
+            text("""
+                SELECT sport,
+                       end_time,
+                       workout_date,
+                       EXTRACT(EPOCH FROM COALESCE(end_time - start_time,
+                                                   INTERVAL '1 hour'))::float / 3600 AS duration_h,
+                       training_stress_score::float
+                FROM workouts
+                WHERE user_id = :uid
+                  AND workout_date BETWEEN :start AND :until
+                  AND sport != 'strength_training'
+            """),
+            {"uid": user_id, "start": start, "until": until},
+        )
+        return result.fetchall()
+
     # ── workout_metrics ────────────────────────────────────────────────────────
 
     async def get_metrics(self, workout_id: int):

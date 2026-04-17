@@ -1,28 +1,36 @@
 """
 RecoveryService
 
-Wraps the sync recovery.py intelligence module.
+Wraps recovery.py intelligence module.
 Today: rule-based HRV deviation + exponential muscle fatigue decay.
 Tomorrow: swap _compute_hrv / _compute_freshness for learned models
           without touching DashboardService.
 """
 
-import asyncio
 from datetime import date
 
 from models.dashboard import HRVStatusSchema, MuscleFreshnessSchema
 
-from db.session import get_connection
 from intelligence.recovery import get_hrv_status, get_muscle_freshness
+from repos.sleep_repo import SleepRepo
+from repos.strength_repo import StrengthRepo
+from repos.workout_repo import WorkoutRepo
 
 
 class RecoveryService:
 
+    def __init__(
+        self,
+        sleep_repo: SleepRepo,
+        strength_repo: StrengthRepo,
+        workout_repo: WorkoutRepo,
+    ):
+        self._sleep_repo    = sleep_repo
+        self._strength_repo = strength_repo
+        self._workout_repo  = workout_repo
+
     async def get_hrv_status(self, today: date, user_id: int = 1) -> tuple[dict, HRVStatusSchema]:
-        """
-        Returns the raw HRV dict (passed to AlertsService) and the mapped schema.
-        """
-        raw = await asyncio.to_thread(self._compute_hrv, today, user_id)
+        raw = await get_hrv_status(self._sleep_repo, today, user_id=user_id)
         schema = HRVStatusSchema(
             status=raw["status"],
             trend=raw.get("trend"),
@@ -34,23 +42,7 @@ class RecoveryService:
         return raw, schema
 
     async def get_muscle_freshness(self, today: date, user_id: int = 1) -> MuscleFreshnessSchema:
-        muscles = await asyncio.to_thread(self._compute_freshness, today, user_id)
+        muscles = await get_muscle_freshness(
+            self._strength_repo, self._workout_repo, today, user_id=user_id
+        )
         return MuscleFreshnessSchema(muscles=muscles)
-
-    # ------------------------------------------------------------------
-    # Sync implementations — run in thread pool
-    # ------------------------------------------------------------------
-
-    def _compute_hrv(self, today: date, user_id: int = 1) -> dict:
-        conn = get_connection()
-        try:
-            return get_hrv_status(conn.cursor(), today, user_id=user_id)
-        finally:
-            conn.close()
-
-    def _compute_freshness(self, today: date, user_id: int = 1) -> dict:
-        conn = get_connection()
-        try:
-            return get_muscle_freshness(conn.cursor(), today, user_id=user_id)
-        finally:
-            conn.close()

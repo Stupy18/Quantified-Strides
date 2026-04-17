@@ -18,27 +18,24 @@ Each alert has a severity:
 
 from datetime import timedelta
 
+from repos.sleep_repo import SleepRepo
+from repos.workout_repo import WorkoutRepo
+from repos.checkin_repo import CheckinRepo
+
 
 # ---------------------------------------------------------------------------
 # Rolling RHR baseline
 # ---------------------------------------------------------------------------
 
-def _get_rhr_baseline(cur, today, window=7, user_id=1):
+async def _get_rhr_baseline(sleep_repo: SleepRepo, today, window: int = 7, user_id: int = 1):
     start = today - timedelta(days=window + 3)
-    cur.execute("""
-        SELECT sleep_date, rhr
-        FROM sleep_sessions
-        WHERE user_id = %s
-          AND sleep_date BETWEEN %s AND %s
-          AND rhr IS NOT NULL
-        ORDER BY sleep_date
-    """, (user_id, start, today))
-    rows = cur.fetchall()
+    rows  = await sleep_repo.get_rhr_series(user_id, start, today)
     if len(rows) < 3:
         return None, None, None
 
-    last_date, last_rhr = rows[-1]
-    baseline_vals = [r[1] for r in rows if r[0] < last_date][-window:]
+    last_date = rows[-1].sleep_date
+    last_rhr  = rows[-1].rhr
+    baseline_vals = [r.rhr for r in rows if r.sleep_date < last_date][-window:]
     if len(baseline_vals) < 3:
         return last_rhr, None, None
 
@@ -50,41 +47,29 @@ def _get_rhr_baseline(cur, today, window=7, user_id=1):
 # Sleep quality cluster
 # ---------------------------------------------------------------------------
 
-def _get_sleep_trend(cur, today, window=3, user_id=1):
+async def _get_sleep_trend(sleep_repo: SleepRepo, today, window: int = 3, user_id: int = 1):
     start = today - timedelta(days=window + 1)
-    cur.execute("""
-        SELECT sleep_date, sleep_score, duration_minutes
-        FROM sleep_sessions
-        WHERE user_id = %s
-          AND sleep_date BETWEEN %s AND %s
-          AND sleep_score IS NOT NULL
-        ORDER BY sleep_date DESC
-        LIMIT %s
-    """, (user_id, start, today, window))
-    rows = cur.fetchall()
+    rows  = await sleep_repo.get_sleep_trend(user_id, start, today, limit=window)
     if not rows:
         return None, None
-    scores    = [r[1] for r in rows]
-    durations = [r[2] for r in rows if r[2]]
+    scores    = [r.sleep_score for r in rows]
+    durations = [r.duration_minutes for r in rows if r.duration_minutes]
     avg_score    = sum(scores) / len(scores)
     avg_duration = sum(durations) / len(durations) if durations else None
     return round(avg_score, 1), round(avg_duration / 60, 1) if avg_duration else None
 
 
 # ---------------------------------------------------------------------------
-# Consecutive training days
+# Consecutive training days — single query, streak in Python
 # ---------------------------------------------------------------------------
 
-def _consecutive_days(cur, today, user_id=1):
+async def _consecutive_days(workout_repo: WorkoutRepo, today, user_id: int = 1) -> int:
+    start   = today - timedelta(days=14)
+    trained = await workout_repo.get_training_dates(user_id, start, today - timedelta(days=1))
     count = 0
     d = today - timedelta(days=1)
     for _ in range(14):
-        cur.execute("""
-            SELECT 1 FROM workouts WHERE user_id=%s AND workout_date=%s
-            UNION
-            SELECT 1 FROM strength_sessions WHERE user_id=%s AND session_date=%s
-        """, (user_id, d, user_id, d))
-        if not cur.fetchone():
+        if d not in trained:
             break
         count += 1
         d -= timedelta(days=1)
@@ -92,26 +77,44 @@ def _consecutive_days(cur, today, user_id=1):
 
 
 # ---------------------------------------------------------------------------
+# Going-out check
+# ---------------------------------------------------------------------------
+
+async def _went_out_last_night(checkin_repo: CheckinRepo, today, user_id: int = 1) -> bool:
+    yesterday = today - timedelta(days=1)
+    return await checkin_repo.get_going_out(user_id, yesterday)
+
+
+# ---------------------------------------------------------------------------
 # Main alert generator
 # ---------------------------------------------------------------------------
 
-def get_alerts(cur, today, tl_metrics, hrv_status, readiness=None, user_id=1):
+async def get_alerts(
+    sleep_repo: SleepRepo,
+    workout_repo: WorkoutRepo,
+    checkin_repo: CheckinRepo,
+    today,
+    tl_metrics: dict,
+    hrv_status: dict,
+    readiness: dict | None = None,
+    user_id: int = 1,
+) -> list[tuple[str, str]]:
     """
     Returns a list of (severity, message) tuples, sorted critical → warning → info.
     """
     alerts = []
 
-    tsb        = tl_metrics["tsb"]
-    ctl        = tl_metrics["ctl"]
-    atl        = tl_metrics["atl"]
-    ramp       = tl_metrics["ramp_rate"]
-    hrv_st     = hrv_status["status"]
-    hrv_dev    = hrv_status.get("deviation")
-    hrv_trend  = hrv_status.get("trend")
+    tsb       = tl_metrics["tsb"]
+    ctl       = tl_metrics["ctl"]
+    atl       = tl_metrics["atl"]
+    ramp      = tl_metrics["ramp_rate"]
+    hrv_st    = hrv_status["status"]
+    hrv_dev   = hrv_status.get("deviation")
+    hrv_trend = hrv_status.get("trend")
 
-    last_rhr, rhr_baseline, rhr_delta = _get_rhr_baseline(cur, today, user_id=user_id)
-    sleep_score_avg, sleep_hrs_avg    = _get_sleep_trend(cur, today, user_id=user_id)
-    consec                            = _consecutive_days(cur, today, user_id)
+    last_rhr, rhr_baseline, rhr_delta = await _get_rhr_baseline(sleep_repo, today, user_id=user_id)
+    sleep_score_avg, sleep_hrs_avg    = await _get_sleep_trend(sleep_repo, today, user_id=user_id)
+    consec                            = await _consecutive_days(workout_repo, today, user_id)
 
     # --- ACWR (Acute:Chronic Workload Ratio) ---
     acwr = atl / ctl if ctl > 5 else None
@@ -197,7 +200,7 @@ def get_alerts(cur, today, tl_metrics, hrv_status, readiness=None, user_id=1):
     if readiness:
         overall = readiness.get("overall")
         energy  = readiness.get("energy")
-        going_out_last_night = _went_out_last_night(cur, today, user_id)
+        going_out_last_night = await _went_out_last_night(checkin_repo, today, user_id)
 
         if going_out_last_night:
             alerts.append(("warning",
@@ -216,7 +219,6 @@ def get_alerts(cur, today, tl_metrics, hrv_status, readiness=None, user_id=1):
             alerts.append(("warning",
                 f"Energy level {energy}/10 — low. Favour shorter, lower-intensity work."))
 
-        # Soreness compound: soreness + going out + suppressed HRV = bad combo
         soreness = readiness.get("soreness")
         if (soreness is not None and soreness >= 7
                 and going_out_last_night
@@ -225,43 +227,28 @@ def get_alerts(cur, today, tl_metrics, hrv_status, readiness=None, user_id=1):
                 f"High soreness ({soreness}/10) + went out last night + HRV dip — "
                 "recovery is compromised. Easy day strongly recommended."))
 
-    # Sort: critical first, then warning, then info
     order = {"critical": 0, "warning": 1, "info": 2}
     alerts.sort(key=lambda x: order[x[0]])
-
     return alerts
 
 
-def _went_out_last_night(cur, today, user_id=1):
-    """Check if yesterday's readiness check-in flagged going_out_tonight."""
-    from datetime import timedelta
-    yesterday = today - timedelta(days=1)
-    cur.execute("""
-        SELECT going_out_tonight FROM daily_readiness
-        WHERE user_id = %s AND entry_date = %s
-    """, (user_id, yesterday,))
-    row = cur.fetchone()
-    return bool(row and row[0])
-
-
 # ---------------------------------------------------------------------------
-# Plain-English metric interpretations
+# Plain-English metric interpretations (no DB access — stays sync)
 # ---------------------------------------------------------------------------
 
-def interpret_metrics(tl_metrics, hrv_status):
+def interpret_metrics(tl_metrics: dict, hrv_status: dict) -> list[str]:
     """
     Returns a list of interpretation strings for CTL/ATL/TSB, HRV, and ramp.
     Each string is one concise sentence suitable for display in the recommendation.
     """
     lines = []
 
-    tsb   = tl_metrics["tsb"]
-    ctl   = tl_metrics["ctl"]
-    atl   = tl_metrics["atl"]
-    ramp  = tl_metrics["ramp_rate"]
-    acwr  = atl / ctl if ctl > 5 else None
+    tsb  = tl_metrics["tsb"]
+    ctl  = tl_metrics["ctl"]
+    atl  = tl_metrics["atl"]
+    ramp = tl_metrics["ramp_rate"]
+    acwr = atl / ctl if ctl > 5 else None
 
-    # TSB interpretation
     if tsb > 10:
         lines.append(f"Form is high (TSB {tsb:+.0f}) — your body is primed, good day to push.")
     elif tsb > 5:
@@ -275,7 +262,6 @@ def interpret_metrics(tl_metrics, hrv_status):
     else:
         lines.append(f"Deep fatigue (TSB {tsb:+.0f}) — recovery is overdue.")
 
-    # Ramp rate interpretation
     if ramp > 5:
         lines.append(f"Fitness ramp +{ramp:.1f} CTL/week — building well, watch total load.")
     elif ramp > 0:
@@ -285,7 +271,6 @@ def interpret_metrics(tl_metrics, hrv_status):
     else:
         lines.append(f"Fitness declining ({ramp:+.1f} CTL/week) — needs more consistent training.")
 
-    # ACWR interpretation
     if acwr:
         if acwr < 0.8:
             lines.append(f"ACWR {acwr:.2f} — below training zone, risk of detraining.")
@@ -296,8 +281,7 @@ def interpret_metrics(tl_metrics, hrv_status):
         else:
             lines.append(f"ACWR {acwr:.2f} — load spike. Injury risk is elevated.")
 
-    # HRV interpretation
-    if hrv_status["status"] != "no_data" and hrv_status["deviation"] is not None:
+    if hrv_status["status"] != "no_data" and hrv_status.get("deviation") is not None:
         dev   = hrv_status["deviation"]
         trend = hrv_status["trend"]
         if dev > 0.5:
