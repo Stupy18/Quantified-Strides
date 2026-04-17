@@ -1,0 +1,67 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: quantifiedstrides_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: quantifiedstrides
+      POSTGRES_USER: quantified
+      POSTGRES_PASSWORD: "2026"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./QuantifiedStrides/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantified -d quantifiedstrides"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  backend:
+    build: ./QuantifiedStrides
+    container_name: quantifiedstrides_be
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./QuantifiedStrides/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      API_CORS_ORIGINS: '["http://localhost","http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - garmin_tokens:/root/.garmin_tokens
+
+  seed:
+    build: ./QuantifiedStrides
+    container_name: quantifiedstrides_seed
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./QuantifiedStrides/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: quantifiedstrides
+      DB_USER: quantified
+      DB_PASSWORD: "2026"
+    entrypoint: ["sh", "scripts/seed_docker.sh"]
+
+  frontend:
+    build: ./frontend
+    container_name: quantifiedstrides_fe
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
+  garmin_tokens:

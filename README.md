@@ -20,7 +20,7 @@ FastAPI Backend (api/)
   ├── ai/                   Claude API narrative + pgvector RAG
   └── schemas/              Pydantic request/response models
 
-Intelligence Layer (core/)
+Intelligence Layer (intelligence/)
   ├── training_load.py      TRIMP, ATL/CTL/TSB, ramp rate
   ├── recovery.py           HRV z-score, muscle fatigue decay model
   ├── alerts.py             Anomaly detection, overtraining flags
@@ -39,7 +39,7 @@ PostgreSQL (Docker — pgvector/pgvector:pg16)
   ├── narrative_cache       (per-user per-day, busts on sport profile change)
   └── knowledge_chunks      (pgvector embeddings — coaching transcripts for RAG)
 
-React Frontend (Vite + shadcn/ui, port 5173)
+React Frontend (Vite + shadcn/ui — nginx port 80 in Docker, port 5173 in dev)
   ├── Dashboard             Alerts, today's plan, ATL/CTL/TSB, muscle heatmap, narrative
   ├── Check-In              Morning readiness + post-workout reflection
   ├── Strength              Session builder, exercise search, progressive overload
@@ -78,59 +78,59 @@ On dashboard load, pgvector similarity search retrieves top-k coaching transcrip
 ## Running Locally
 
 ### Prerequisites
-- Docker
-- Python 3.11+
-- Node.js 20.19+ or 22.12+
+- Docker + Docker Desktop
 
-### Setup
+That's it for the full stack. Python and Node are only needed for local dev (hot-reload mode).
+
+### Full Docker (recommended)
 
 ```bash
 git clone https://github.com/03vladd/QuantifiedStrides.git
-cd QuantifiedStrides
+cd QuantifiedStrides-main
 
-# Environment
-cp .env.example .env
-# Fill in: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
-#          JWT_SECRET, ANTHROPIC_API_KEY
-#          SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
+# Environment — fill in secrets
+cp QuantifiedStrides/.env.example QuantifiedStrides/.env
+# Required: JWT_SECRET, ANTHROPIC_API_KEY
+# Required: GARMIN_EMAIL, GARMIN_PASSWORD, OPENWEATHER_API_KEY
+# Optional: SMTP_* (for email verification)
 
-# Database (Docker — starts PostgreSQL with pgvector)
-docker compose up -d
-
-# Backend dependencies
-python -m venv .venv
-source .venv/bin/activate        # Linux/Mac
-# .venv\Scripts\activate         # Windows
-pip install -r requirements.txt
-
-# Frontend dependencies
-cd frontend && npm install && cd ..
+docker compose up -d --build
 ```
 
-### Run
+- App: **http://localhost**
+- API docs: **http://localhost:8000/docs**
+
+Register an account — the seed container auto-populates 90 days of demo data once a user exists:
 
 ```bash
-# Backend — http://localhost:8000/docs
+docker logs -f quantifiedstrides_seed
+```
+
+To wipe and start fresh:
+```bash
+docker compose down -v && docker compose up -d
+```
+
+### Local Dev (hot-reload)
+
+Requires Python 3.11+ and Node 20+.
+
+```bash
+# DB only via Docker
+docker compose up -d db
+
+# Backend
+cd QuantifiedStrides
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-# Frontend — http://localhost:5173
-cd frontend && npm run dev
-
-# Garmin sync (manual — or trigger via UI Sync button)
-python ingestion/workout.py
-python ingestion/sleep.py
-python ingestion/environment.py
-
-
-#If you have previously completed the setup, and this isn't
-#the first time running, simply run this command from project
-#root (../QuantifiedStrides) for both DB and BE
-cd QuantifiedStrides/ && docker compose up -d && source .venv/bin/activate && uvicorn main:app --reload --port 8000
-
-#And then run the following from root in another terminal
-#for frontend
-cd frontend/ && npm run dev
-
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+# App: http://localhost:5173
 ```
 
 ---

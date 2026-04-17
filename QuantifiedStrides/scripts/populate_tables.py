@@ -13,6 +13,7 @@ Fills 90 days of:
   - environment_data
 """
 
+import os
 import random
 import math
 from datetime import date, datetime, timedelta
@@ -21,11 +22,11 @@ import psycopg2
 
 # ── DB connection — matches your .env ────────────────────────────────────────
 conn = psycopg2.connect(
-    host="localhost",
-    port=5432,
-    dbname="quantifiedstrides",
-    user="quantified",
-    password="2026",
+    host=os.environ.get("DB_HOST", "localhost"),
+    port=int(os.environ.get("DB_PORT", 5432)),
+    dbname=os.environ.get("DB_NAME", "quantifiedstrides"),
+    user=os.environ.get("DB_USER", "quantified"),
+    password=os.environ.get("DB_PASSWORD", "2026"),
 )
 cur = conn.cursor()
 

@@ -22,20 +22,47 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 
 ## Running Locally
 
-```bash
-# Database (Docker)
-docker compose up -d
+### Full Docker (primary — runs everything)
 
-# Backend (run from QuantifiedStrides/)
+```bash
+# From project root (QuantifiedStrides-main/)
+docker compose up -d --build
+
+# App:      http://localhost        (nginx → React)
+# API docs: http://localhost:8000/docs
+```
+
+Register an account via the UI — the seed container detects the new user and auto-populates 90 days of demo data. Watch it with:
+
+```bash
+docker logs -f quantifiedstrides_seed
+```
+
+To reset the database completely:
+```bash
+docker compose down -v && docker compose up -d
+```
+
+### Local Dev (hot-reload — BE + FE only, DB still via Docker)
+
+```bash
+# From QuantifiedStrides-main/
+docker compose up -d db          # DB only
+
+# Backend (from QuantifiedStrides/)
+source .venv/bin/activate
 uvicorn main:app --reload --port 8000
 # Docs: http://localhost:8000/docs
 
-# Frontend
-cd frontend && npm run dev
+# Frontend (from frontend/)
+npm run dev
 # App: http://localhost:5173
+```
 
-# Garmin sync — primary path is via API
-# POST /api/v1/sync/garmin (frontend "Sync" button)
+### Garmin Sync
+
+```bash
+# Primary: frontend "Sync" button → POST /api/v1/sync/garmin
 # CLI fallback (each file has __main__ block):
 python ingestion/workout.py
 python ingestion/sleep.py
@@ -144,18 +171,19 @@ db/
 
 ```
 scripts/
-  check_connections.py       # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
-  backfill_workouts.py       # one-time: backfilled historical Garmin workouts
-  backfill_sleep.py          # one-time: backfilled historical sleep data
+  check_connections.py        # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
+  backfill_workouts.py        # one-time: backfilled historical Garmin workouts
+  backfill_sleep.py           # one-time: backfilled historical sleep data
   backfill_workout_metrics.py # one-time: backfilled workout_metrics time-series
-  ingest_knowledge.py        # one-time: embed coaching transcripts into pgvector
-  import_wger.py             # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
-  import_exercises.py        # one-time: imported 36 custom exercises
-  migrate_cascade.py         # schema migration helper
-  populate_tables.py         # seed script for dev/test data
-  populate_tables2.py        # seed script (extended)
-  dump_tables.py             # dump table contents for inspection
-  debug_sleep.py             # sleep data debug utility
+  ingest_knowledge.py         # one-time: embed coaching transcripts into pgvector
+  import_wger.py              # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
+  import_exercises.py         # one-time: imported 36 custom exercises
+  migrate_cascade.py          # schema migration helper
+  populate_tables.py          # seed 90 days of demo data (workouts, sleep, readiness, reflections)
+  populate_tables2.py         # seed exercises, workout_metrics, strength sessions
+  seed_docker.sh              # Docker entrypoint for seed service — polls for user then runs both populate scripts
+  dump_tables.py              # dump table contents for inspection
+  debug_sleep.py              # sleep data debug utility
 ```
 
 ### Tests — `tests/`
@@ -208,7 +236,13 @@ api/
   sleep.js, running.js, sync.js
 ```
 
-### Root-Level (`QuantifiedStrides/`)
+### Root-Level (`QuantifiedStrides-main/`)
+
+```
+docker-compose.yml      # orchestrates db, backend, frontend, seed services
+```
+
+### Backend Root (`QuantifiedStrides/`)
 
 ```
 main.py                 # FastAPI app entry point (imports app from routers, registers middleware)
@@ -216,8 +250,16 @@ deps.py                 # shared FastAPI dependencies: get_db(), get_current_use
                         # repo factories (get_user_repo, get_workout_repo, get_strength_repo,
                         # get_checkin_repo, get_sleep_repo) — all injected via Depends()
 requirements.txt
-docker-compose.yml
+Dockerfile              # python:3.11-slim image; installs requirements, runs uvicorn
+.dockerignore
 .env / .env.example
+```
+
+### Frontend Root (`frontend/`)
+
+```
+Dockerfile              # multi-stage: node:20-alpine build → nginx:alpine serve
+nginx.conf              # serves React SPA on port 80, proxies /api/ to backend:8000
 ```
 
 ## Database Schema (PostgreSQL)
