@@ -44,7 +44,6 @@ class EnvironmentRepo:
             """),
             {"workout_id": workout_id, **data},
         )
-        await self.db.commit()
 
     async def get_workout_for_date(self, d: date, user_id: int):
         """Fetch workout_id and coordinates for a given date and user — used by env data collector."""

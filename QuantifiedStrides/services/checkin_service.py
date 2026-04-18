@@ -40,6 +40,7 @@ class CheckinService:
             "time_available":   payload.time_available,
             "going_out_tonight": payload.going_out_tonight,
         })
+        await repo.db.commit()
         return self._map_readiness(row)
 
     async def get_readiness(
@@ -76,6 +77,7 @@ class CheckinService:
             "notes":           payload.notes,
             "load_feel":       payload.load_feel,
         })
+        await repo.db.commit()
         return self._map_reflection(row)
 
     async def get_reflection(
@@ -107,6 +109,7 @@ class CheckinService:
             "entry_date": payload.entry_date,
             "content":    payload.content,
         })
+        await repo.db.commit()
         return JournalEntrySchema(
             entry_id=row.entry_id,
             user_id=row.user_id,
@@ -118,6 +121,7 @@ class CheckinService:
         self, repo: CheckinRepo, user_id: int, entry_date: date
     ) -> JournalEntrySchema | None:
         await repo.ensure_journal_table()
+        await repo.db.commit()
         row = await repo.get_journal(user_id, entry_date)
         if not row:
             return None
