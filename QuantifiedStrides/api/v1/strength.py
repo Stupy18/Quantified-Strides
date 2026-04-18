@@ -11,7 +11,7 @@ from models.strength import (
     StrengthWorkoutSchema,
 )
 from repos.strength_repo import StrengthRepo
-from services.strength import StrengthService
+from services.strength_service import StrengthService
 
 router = APIRouter(prefix="/strength", tags=["strength"])
 _svc = StrengthService()

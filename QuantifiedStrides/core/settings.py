@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str
 
+    # Garmin
+    garmin_sync_enabled: bool = True
+
     @computed_field
     @property
     def database_url(self) -> str:

@@ -1,29 +1,32 @@
 """
 TrainingLoadService
 
-Wraps the sync training_load.py intelligence module.
-Today: rule-based TRIMP/ATL/CTL/TSB computation via psycopg2.
-Tomorrow: swap the _sync implementation for a learned load model
-          without touching DashboardService.
+Wraps training_load.py intelligence module.
+Today: rule-based TRIMP/ATL/CTL/TSB.
+Tomorrow: swap _compute for a learned load model without touching DashboardService.
 """
 
-import asyncio
 from datetime import date
 
 from models.dashboard import TrainingLoadSchema
 
-from db.session import get_connection
 from intelligence.training_load import get_metrics, tsb_intensity_hint
+from repos.workout_repo import WorkoutRepo
+from repos.strength_repo import StrengthRepo
 
 
 class TrainingLoadService:
+
+    def __init__(self, workout_repo: WorkoutRepo, strength_repo: StrengthRepo):
+        self._workout_repo  = workout_repo
+        self._strength_repo = strength_repo
 
     async def get_metrics(self, today: date, user_id: int = 1) -> tuple[dict, TrainingLoadSchema]:
         """
         Returns the raw metrics dict (passed to AlertsService) and the
         mapped TrainingLoadSchema (used by DashboardService directly).
         """
-        raw = await asyncio.to_thread(self._compute, today, user_id)
+        raw = await get_metrics(self._workout_repo, self._strength_repo, today, user_id=user_id)
         freshness_label, intensity_modifier = tsb_intensity_hint(raw["tsb"])
         schema = TrainingLoadSchema(
             ctl=raw["ctl"],
@@ -35,15 +38,3 @@ class TrainingLoadService:
             intensity_modifier=intensity_modifier,
         )
         return raw, schema
-
-    # ------------------------------------------------------------------
-    # Sync implementation — runs in thread pool
-    # ------------------------------------------------------------------
-
-    def _compute(self, today: date, user_id: int = 1) -> dict:
-        conn = get_connection()
-        try:
-            cur = conn.cursor()
-            return get_metrics(cur, today, user_id=user_id)
-        finally:
-            conn.close()

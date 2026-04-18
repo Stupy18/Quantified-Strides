@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from deps import get_current_user_id, get_sleep_repo
 from models.sleep import SleepDetailSchema, SleepListItemSchema, SleepTrendPointSchema
 from repos.sleep_repo import SleepRepo
-from services.sleep import SleepService
+from services.sleep_service import SleepService
 
 router = APIRouter(prefix="/sleep", tags=["sleep"])
 _svc = SleepService()

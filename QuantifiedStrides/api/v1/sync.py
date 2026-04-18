@@ -1,6 +1,7 @@
 import garminconnect
 from fastapi import APIRouter, Depends, HTTPException
 
+from core.settings import settings
 from deps import get_current_user_id, get_user_repo, AsyncSessionLocal
 from ingestion.environment import collect_environment_data
 from ingestion.okgarmin_connection import get_garmin_client
@@ -23,6 +24,10 @@ async def trigger_sync(
     user_id: int = Depends(get_current_user_id),
     repo: UserRepo = Depends(get_user_repo),
 ):
+    if not settings.garmin_sync_enabled:
+        print("Garmin sync skipped — GARMIN_SYNC_ENABLED=false")
+        return {"ok": False, "results": [], "detail": "Garmin sync disabled (GARMIN_SYNC_ENABLED=false)"}
+
     try:
         client = get_garmin_client()
     except _GARMIN_AUTH_ERRORS as e:

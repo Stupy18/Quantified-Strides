@@ -6,7 +6,7 @@ from models.auth import (
     UpdateProfileSchema, UserProfileSchema,
 )
 from repos.user_repo import UserRepo
-from services import auth as auth_svc
+from services import auth_service as auth_svc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

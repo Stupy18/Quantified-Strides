@@ -12,25 +12,10 @@ from collections.abc import AsyncGenerator
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.settings import settings
-from services.auth import decode_token
-
-engine = create_async_engine(
-    settings.database_url,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    echo=settings.db_echo,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
+from db.engine import AsyncSessionLocal
+from services.auth_service import decode_token
 
 _bearer = HTTPBearer()
 
@@ -74,3 +59,21 @@ def get_checkin_repo(db: AsyncSession = Depends(get_db)):
 def get_sleep_repo(db: AsyncSession = Depends(get_db)):
     from repos.sleep_repo import SleepRepo
     return SleepRepo(db)
+
+
+def get_workout_metrics_repo(db: AsyncSession = Depends(get_db)):
+    from repos.workout_metrics_repo import WorkoutMetricsRepo
+    return WorkoutMetricsRepo(db)
+
+
+def get_running_service(
+    metrics_repo=Depends(get_workout_metrics_repo),
+    workout_repo=Depends(get_workout_repo),
+):
+    from services.running_service import RunningService
+    return RunningService(metrics_repo, workout_repo)
+
+
+def get_dashboard_service(db: AsyncSession = Depends(get_db)):
+    from services.dashboard_service import DashboardService
+    return DashboardService(db)
