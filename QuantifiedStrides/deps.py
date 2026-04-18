@@ -12,25 +12,10 @@ from collections.abc import AsyncGenerator
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.settings import settings
+from db.engine import AsyncSessionLocal
 from services.auth_service import decode_token
-
-engine = create_async_engine(
-    settings.database_url,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    echo=settings.db_echo,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
 
 _bearer = HTTPBearer()
 

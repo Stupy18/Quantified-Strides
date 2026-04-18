@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import garminconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.session import AsyncSessionLocal
+from db.engine import AsyncSessionLocal
 from ingestion.okgarmin_connection import get_garmin_client, reset_garmin_client
 from repos.workout_repo import WorkoutRepo
 

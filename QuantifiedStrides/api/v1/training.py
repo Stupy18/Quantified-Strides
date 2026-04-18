@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from deps import get_current_user_id, get_strength_repo, get_workout_repo
+from deps import get_current_user_id, get_sleep_repo, get_strength_repo, get_workout_repo
 from models.training import (
     HRVHistoryPointSchema,
     TrainingHistoryPointSchema,
@@ -10,6 +10,7 @@ from models.training import (
     WorkoutDetailSchema,
     WorkoutListItemSchema,
 )
+from repos.sleep_repo import SleepRepo
 from repos.strength_repo import StrengthRepo
 from repos.workout_repo import WorkoutRepo
 from services.training_service import TrainingService
@@ -23,8 +24,10 @@ async def get_training_history(
     today: date = Query(default_factory=date.today),
     days: int = Query(default=90, ge=7, le=365),
     user_id: int = Depends(get_current_user_id),
+    workout_repo: WorkoutRepo = Depends(get_workout_repo),
+    strength_repo: StrengthRepo = Depends(get_strength_repo),
 ):
-    return await _svc.get_training_history(today, days)
+    return await _svc.get_training_history(workout_repo, strength_repo, user_id, today, days)
 
 
 @router.get("/hrv-history", response_model=list[HRVHistoryPointSchema])
@@ -32,8 +35,9 @@ async def get_hrv_history(
     today: date = Query(default_factory=date.today),
     days: int = Query(default=30, ge=7, le=180),
     user_id: int = Depends(get_current_user_id),
+    sleep_repo: SleepRepo = Depends(get_sleep_repo),
 ):
-    return await _svc.get_hrv_history(today, days)
+    return await _svc.get_hrv_history(sleep_repo, user_id, today, days)
 
 
 @router.get("/weekly-volume", response_model=list[WeeklyVolumeSchema])
