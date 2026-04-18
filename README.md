@@ -85,7 +85,7 @@ That's it for the full stack. Python and Node are only needed for local dev (hot
 ### Full Docker (recommended)
 
 ```bash
-git clone https://github.com/03vladd/QuantifiedStrides.git
+git clone https://github.com/Stupy18/Quantified-Strides.git
 cd QuantifiedStrides-main
 
 # Environment — fill in secrets
