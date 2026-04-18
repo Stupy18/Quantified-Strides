@@ -66,6 +66,16 @@ def get_workout_metrics_repo(db: AsyncSession = Depends(get_db)):
     return WorkoutMetricsRepo(db)
 
 
+def get_checkin_service():
+    from services.checkin_service import CheckinService
+    return CheckinService()
+
+
+def get_strength_service():
+    from services.strength_service import StrengthService
+    return StrengthService()
+
+
 def get_running_service(
     metrics_repo=Depends(get_workout_metrics_repo),
     workout_repo=Depends(get_workout_repo),
