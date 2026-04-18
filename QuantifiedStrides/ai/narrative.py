@@ -156,6 +156,7 @@ async def generate_narrative(
         narrative = response.content[0].text.strip()
 
         await narrative_repo.upsert_cache(user_id, today, cache_key, narrative)
+        await narrative_repo.db.commit()
         return narrative
 
     except Exception:

@@ -94,6 +94,7 @@ async def collect_environment_data(db: AsyncSession):
     }
 
     await repo.insert(workout_id, data)
+    await repo.db.commit()
 
     print(f"Environmental data for {data['location']} recorded successfully!")
     print(f"Temperature: {data['temperature']}°C, Wind: {data['wind_speed']} m/s at {data['wind_direction']}°")

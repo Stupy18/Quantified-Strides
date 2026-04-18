@@ -169,4 +169,3 @@ class SleepRepo:
             """),
             {"user_id": user_id, **data},
         )
-        await self.db.commit()

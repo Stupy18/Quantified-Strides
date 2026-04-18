@@ -63,6 +63,7 @@ async def collect_sleep_data(db: AsyncSession, user_id: int, client: garminconne
     }
 
     await repo.insert(user_id, data)
+    await repo.db.commit()
     print(f"Inserted today's sleep data for {today_date_str} successfully!")
 
 

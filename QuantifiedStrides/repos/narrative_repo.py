@@ -33,4 +33,3 @@ class NarrativeRepo:
             """),
             {"uid": user_id, "d": today, "k": cache_key, "n": narrative},
         )
-        await self.db.commit()
