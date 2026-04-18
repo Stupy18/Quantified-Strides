@@ -2,146 +2,112 @@ from datetime import datetime
 
 import requests
 
-from config import OPENWEATHER_API_KEY
-from db.session import get_connection
+from core.config import OPENWEATHER_API_KEY
+from db.engine import AsyncSessionLocal
+from repos.environment_repo import EnvironmentRepo
+from sqlalchemy.ext.asyncio import AsyncSession
 
-conn = get_connection()
-cursor = conn.cursor()
-print("Cursor connected")
 
-today = datetime.now().date()
-print(f"Collecting environmental data for: {today}")
+async def collect_environment_data(db: AsyncSession):
+    repo = EnvironmentRepo(db)
 
-# Skip if environment data for today already exists
-cursor.execute(
-    "SELECT env_id FROM environment_data WHERE record_datetime::date = %s",
-    (today,)
-)
-if cursor.fetchone():
-    print(f"Environment data for {today} already recorded. Skipping.")
-    cursor.close()
-    conn.close()
-    raise SystemExit(0)
+    today = datetime.now().date()
+    print(f"Collecting environmental data for: {today}")
 
-# Link to today's workout if one exists — NULL on rest days (no placeholder created)
-cursor.execute(
-    "SELECT workout_id, start_latitude, start_longitude, location FROM workouts WHERE workout_date = %s AND user_id = 1",
-    (today,)
-)
-row = cursor.fetchone()
-workout_id = row[0] if row else None
-workout_lat = row[1] if row else None
-workout_lon = row[2] if row else None
-workout_location_name = row[3] if row else None
+    # Skip if environment data for today already exists
+    if await repo.exists_for_date(today):
+        print(f"Environment data for {today} already recorded. Skipping.")
+        return
 
-if workout_id:
-    print(f"Linking environment data to workout ID: {workout_id}")
-else:
-    print("No workout today — recording environment data as standalone (rest day).")
+    # Link to today's workout if one exists — NULL on rest days
+    row = await repo.get_workout_for_date(today, user_id=1)
+    workout_id = row.workout_id if row else None
+    workout_lat = row.start_latitude if row else None
+    workout_lon = row.start_longitude if row else None
+    workout_location_name = row.location if row else None
 
-# Determine coordinates:
-# 1. Use workout GPS if available (outdoor activity with start coordinates)
-# 2. Fall back to IP geolocation (reflects actual current location)
-if workout_lat and workout_lon:
-    lat, lon = workout_lat, workout_lon
-    print(f"Using workout GPS coordinates: {lat}, {lon}")
-else:
+    if workout_id:
+        print(f"Linking environment data to workout ID: {workout_id}")
+    else:
+        print("No workout today — recording environment data as standalone (rest day).")
+
+    # Determine coordinates:
+    # 1. Use workout GPS if available
+    # 2. Fall back to IP geolocation
+    if workout_lat and workout_lon:
+        lat, lon = workout_lat, workout_lon
+        print(f"Using workout GPS coordinates: {lat}, {lon}")
+    else:
+        try:
+            geo = requests.get("https://ipinfo.io/json", timeout=5).json()
+            lat, lon = map(float, geo["loc"].split(","))
+            workout_location_name = geo.get("city", workout_location_name)
+            print(f"Using IP geolocation: {workout_location_name} ({lat}, {lon})")
+        except Exception as e:
+            print(f"Warning: IP geolocation failed ({e}). Coordinates unavailable.")
+            lat = lon = None
+
+    if lat is None or lon is None:
+        print("No coordinates available — cannot collect environment data.")
+        return
+
+    # Current weather
+    weather_data = requests.get(
+        f"https://api.openweathermap.org/data/2.5/weather"
+        f"?lat={lat}&lon={lon}&units=metric&appid={OPENWEATHER_API_KEY}"
+    ).json()
+
+    # UV index
+    uv_data = requests.get(
+        f"https://api.openweathermap.org/data/2.5/onecall"
+        f"?lat={lat}&lon={lon}&exclude=minutely,hourly,daily,alerts&appid={OPENWEATHER_API_KEY}"
+    ).json()
+
+    # Pollen (Open-Meteo Air Quality)
     try:
-        geo = requests.get("https://ipinfo.io/json", timeout=5).json()
-        lat, lon = map(float, geo["loc"].split(","))
-        workout_location_name = geo.get("city", workout_location_name)
-        print(f"Using IP geolocation: {workout_location_name} ({lat}, {lon})")
+        pollen_data = requests.get(
+            f"https://air-quality-api.open-meteo.com/v1/air-quality"
+            f"?latitude={lat}&longitude={lon}"
+            f"&current=grass_pollen,birch_pollen,ragweed_pollen",
+            timeout=10,
+        ).json().get("current", {})
+        grass_pollen = pollen_data.get("grass_pollen")
+        tree_pollen = pollen_data.get("birch_pollen")
+        weed_pollen = pollen_data.get("ragweed_pollen")
     except Exception as e:
-        print(f"Warning: IP geolocation failed ({e}). Coordinates unavailable.")
-        lat = lon = None
+        print(f"Warning: Open-Meteo pollen unavailable ({e}). Storing NULL.")
+        grass_pollen = tree_pollen = weed_pollen = None
 
-if lat is None or lon is None:
-    print("No coordinates available — cannot collect environment data.")
-    cursor.close()
-    conn.close()
-    raise SystemExit(1)
+    data = {
+        "record_datetime": datetime.now(),
+        "location": weather_data.get("name") or workout_location_name or "Unknown",
+        "temperature": weather_data.get("main", {}).get("temp"),
+        "wind_speed": weather_data.get("wind", {}).get("speed"),
+        "wind_direction": weather_data.get("wind", {}).get("deg"),
+        "humidity": weather_data.get("main", {}).get("humidity"),
+        "precipitation": weather_data.get("rain", {}).get("1h", 0) if "rain" in weather_data else 0,
+        "grass_pollen": grass_pollen,
+        "tree_pollen": tree_pollen,
+        "weed_pollen": weed_pollen,
+        "uv_index": uv_data.get("current", {}).get("uvi", 0),
+        "subjective_notes": "Daily environment check",
+    }
 
-# Current weather
-weather_url = (
-    f"https://api.openweathermap.org/data/2.5/weather"
-    f"?lat={lat}&lon={lon}&units=metric&appid={OPENWEATHER_API_KEY}"
-)
-weather_data = requests.get(weather_url).json()
+    await repo.insert(workout_id, data)
+    await repo.db.commit()
 
-# UV index
-uv_url = (
-    f"https://api.openweathermap.org/data/2.5/onecall"
-    f"?lat={lat}&lon={lon}&exclude=minutely,hourly,daily,alerts&appid={OPENWEATHER_API_KEY}"
-)
-uv_data = requests.get(uv_url).json()
-
-# Pollen (Open-Meteo Air Quality — no API key required)
-try:
-    pollen_url = (
-        f"https://air-quality-api.open-meteo.com/v1/air-quality"
-        f"?latitude={lat}&longitude={lon}"
-        f"&current=grass_pollen,birch_pollen,ragweed_pollen"
-    )
-    pollen_data = requests.get(pollen_url, timeout=10).json().get("current", {})
-    grass_pollen = pollen_data.get("grass_pollen")
-    tree_pollen = pollen_data.get("birch_pollen")
-    weed_pollen = pollen_data.get("ragweed_pollen")
-except Exception as e:
-    print(f"Warning: Open-Meteo pollen unavailable ({e}). Storing NULL.")
-    grass_pollen = tree_pollen = weed_pollen = None
-
-location = weather_data.get("name") or workout_location_name or "Unknown"
-temperature = weather_data.get("main", {}).get("temp")
-wind_speed = weather_data.get("wind", {}).get("speed")
-wind_direction = weather_data.get("wind", {}).get("deg")
-humidity = weather_data.get("main", {}).get("humidity")
-precipitation = weather_data.get("rain", {}).get("1h", 0) if "rain" in weather_data else 0
-uv_index = uv_data.get("current", {}).get("uvi", 0)
-record_datetime = datetime.now()
-
-sql_insert = """
-INSERT INTO environment_data (
-    workout_id,
-    record_datetime,
-    location,
-    temperature,
-    wind_speed,
-    wind_direction,
-    humidity,
-    precipitation,
-    grass_pollen,
-    tree_pollen,
-    weed_pollen,
-    uv_index,
-    subjective_notes
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-"""
-
-try:
-    cursor.execute(sql_insert, (
-        workout_id,
-        record_datetime,
-        location,
-        temperature,
-        wind_speed,
-        wind_direction,
-        humidity,
-        precipitation,
-        grass_pollen,
-        tree_pollen,
-        weed_pollen,
-        uv_index,
-        "Daily environment check",
-    ))
-    conn.commit()
-    print(f"Environmental data for {location} recorded successfully!")
-    print(f"Temperature: {temperature}°C, Wind: {wind_speed} m/s at {wind_direction}°")
-    print(f"Humidity: {humidity}%, Precipitation: {precipitation} mm")
+    print(f"Environmental data for {data['location']} recorded successfully!")
+    print(f"Temperature: {data['temperature']}°C, Wind: {data['wind_speed']} m/s at {data['wind_direction']}°")
+    print(f"Humidity: {data['humidity']}%, Precipitation: {data['precipitation']} mm")
     print(f"Pollen — grass: {grass_pollen}, tree: {tree_pollen}, weed: {weed_pollen} grains/m³")
-    print(f"UV Index: {uv_index}")
-except Exception as e:
-    conn.rollback()
-    print(f"Error inserting environmental data: {e}")
-finally:
-    cursor.close()
-    conn.close()
+    print(f"UV Index: {data['uv_index']}")
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        async with AsyncSessionLocal() as db:
+            await collect_environment_data(db)
+
+    asyncio.run(main())

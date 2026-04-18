@@ -119,6 +119,37 @@ class SleepRepo:
         )
         return result.fetchall()
 
+    async def get_rhr_series(self, user_id: int, start: date, until: date):
+        """RHR series for baseline deviation alerting (alerts.py)."""
+        result = await self.db.execute(
+            text("""
+                SELECT sleep_date, rhr
+                FROM sleep_sessions
+                WHERE user_id = :uid
+                  AND sleep_date BETWEEN :start AND :until
+                  AND rhr IS NOT NULL
+                ORDER BY sleep_date
+            """),
+            {"uid": user_id, "start": start, "until": until},
+        )
+        return result.fetchall()
+
+    async def get_sleep_trend(self, user_id: int, start: date, until: date, limit: int = 3):
+        """Recent sleep score + duration for sleep quality alerts (alerts.py)."""
+        result = await self.db.execute(
+            text("""
+                SELECT sleep_date, sleep_score, duration_minutes
+                FROM sleep_sessions
+                WHERE user_id = :uid
+                  AND sleep_date BETWEEN :start AND :until
+                  AND sleep_score IS NOT NULL
+                ORDER BY sleep_date DESC
+                LIMIT :limit
+            """),
+            {"uid": user_id, "start": start, "until": until, "limit": limit},
+        )
+        return result.fetchall()
+
     # ── ingestion ──────────────────────────────────────────────────────────────
 
     async def insert(self, user_id: int, data: dict) -> None:
@@ -138,4 +169,3 @@ class SleepRepo:
             """),
             {"user_id": user_id, **data},
         )
-        await self.db.commit()

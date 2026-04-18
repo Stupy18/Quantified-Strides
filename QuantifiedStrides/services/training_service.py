@@ -4,7 +4,6 @@ TrainingService
 Handles training load history, HRV history, workout list, and workout detail.
 """
 
-import asyncio
 from datetime import date
 
 from models.training import (
@@ -15,29 +14,27 @@ from models.training import (
     WorkoutListItemSchema,
     WorkoutMetricPointSchema,
 )
+from repos.sleep_repo import SleepRepo
 from repos.strength_repo import StrengthRepo
 from repos.workout_repo import WorkoutRepo
-from db.session import get_connection
 from intelligence.training_load import get_history, get_hrv_history
 
 
 class TrainingService:
 
     # ------------------------------------------------------------------
-    # Training load history (wraps sync intelligence module — not yet migrated)
+    # Training load history
     # ------------------------------------------------------------------
 
     async def get_training_history(
-        self, today: date, days: int = 90
+        self,
+        workout_repo: WorkoutRepo,
+        strength_repo: StrengthRepo,
+        user_id: int,
+        today: date,
+        days: int = 90,
     ) -> list[TrainingHistoryPointSchema]:
-        def _sync():
-            conn = get_connection()
-            try:
-                return get_history(conn.cursor(), today, days=days)
-            finally:
-                conn.close()
-
-        rows = await asyncio.to_thread(_sync)
+        rows = await get_history(workout_repo, strength_repo, today, days=days, user_id=user_id)
         return [
             TrainingHistoryPointSchema(
                 date=r["date"],
@@ -50,16 +47,13 @@ class TrainingService:
         ]
 
     async def get_hrv_history(
-        self, today: date, days: int = 30
+        self,
+        sleep_repo: SleepRepo,
+        user_id: int,
+        today: date,
+        days: int = 30,
     ) -> list[HRVHistoryPointSchema]:
-        def _sync():
-            conn = get_connection()
-            try:
-                return get_hrv_history(conn.cursor(), today, days=days)
-            finally:
-                conn.close()
-
-        rows = await asyncio.to_thread(_sync)
+        rows = await get_hrv_history(sleep_repo, today, days=days, user_id=user_id)
         return [
             HRVHistoryPointSchema(
                 date=r["date"],

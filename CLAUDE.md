@@ -22,23 +22,51 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 
 ## Running Locally
 
-```bash
-# Database (Docker)
-docker compose up -d
+### Full Docker (primary — runs everything)
 
-# Backend (run from QuantifiedStrides/)
+```bash
+# From project root (QuantifiedStrides-main/)
+docker compose up -d --build
+
+# App:      http://localhost        (nginx → React)
+# API docs: http://localhost:8000/docs
+```
+
+Register an account via the UI — the seed container detects the new user and auto-populates 90 days of demo data. Watch it with:
+
+```bash
+docker logs -f quantifiedstrides_seed
+```
+
+To reset the database completely:
+```bash
+docker compose down -v && docker compose up -d
+```
+
+### Local Dev (hot-reload — BE + FE only, DB still via Docker)
+
+```bash
+# From QuantifiedStrides-main/
+docker compose up -d db          # DB only
+
+# Backend (from QuantifiedStrides/)
+source .venv/bin/activate
 uvicorn main:app --reload --port 8000
 # Docs: http://localhost:8000/docs
 
-# Frontend
-cd frontend && npm run dev
+# Frontend (from frontend/)
+npm run dev
 # App: http://localhost:5173
+```
 
-# Garmin sync (manual trigger)
-python workout.py
-python sleep.py
-python environment.py
-# or via API: POST /api/v1/sync/garmin
+### Garmin Sync
+
+```bash
+# Primary: frontend "Sync" button → POST /api/v1/sync/garmin
+# CLI fallback (each file has __main__ block):
+python ingestion/workout.py
+python ingestion/sleep.py
+python ingestion/environment.py
 ```
 
 ## Project Structure
@@ -61,28 +89,29 @@ api/v1/
   running.py          # running biomechanics analytics
   sync.py             # POST /sync/garmin — triggers Garmin pipeline
 repos/                # repository layer — all SQL lives here, injected via FastAPI Depends
-  user_repo.py        # users + user_profile queries
-  workout_repo.py     # workouts + workout_metrics queries
-  strength_repo.py    # strength_sessions, strength_exercises, strength_sets, exercises queries
-  sleep_repo.py       # sleep_sessions queries
-  checkin_repo.py     # daily_readiness, workout_reflection, journal_entries queries
-  environment_repo.py # environment_data queries
-  knowledge_repo.py   # pgvector similarity search on knowledge_chunks
-  narrative_repo.py   # narrative_cache get/upsert
+  user_repo.py             # users + user_profile queries
+  workout_repo.py          # workouts table queries + intelligence helpers
+  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain)
+  strength_repo.py         # strength_sessions, strength_exercises, strength_sets, exercises queries
+  sleep_repo.py            # sleep_sessions queries
+  checkin_repo.py          # daily_readiness, workout_reflection, journal_entries queries
+  environment_repo.py      # environment_data queries
+  knowledge_repo.py        # pgvector similarity search on knowledge_chunks
+  narrative_repo.py        # narrative_cache get/upsert
 services/
-  auth.py             # JWT issue/verify, password hash, email verification
-  email.py            # SMTP email sending
-  dashboard.py        # orchestrates all services into one dashboard payload
-  checkin.py          # readiness + reflection CRUD
-  strength.py         # strength session/exercise/set CRUD + 1RM
-  running.py          # running biomechanics computations
-  sleep.py            # sleep history queries
-  training.py         # workout history queries
-  adapters/           # thin async wrappers — bridge sync intelligence/ to async API
-    training_load.py  # asyncio.to_thread wrapper around intelligence.training_load
-    recovery.py       # asyncio.to_thread wrapper around intelligence.recovery
-    alerts.py         # asyncio.to_thread wrapper around intelligence.alerts
-    recommendation.py # asyncio.to_thread wrapper around intelligence.recommend
+  auth_service.py          # JWT issue/verify, password hash, email verification
+  email_service.py         # SMTP email sending
+  dashboard_service.py     # orchestrates all intelligence services into one dashboard payload
+  checkin_service.py       # readiness + reflection CRUD
+  strength_service.py      # strength session/exercise/set CRUD + 1RM
+  running_service.py       # running biomechanics computations
+  sleep_service.py         # sleep history queries
+  training_service.py      # workout history queries
+  intelligence/            # service wrappers around the intelligence layer
+    training_load_service.py  # injects repos into intelligence.training_load; maps to schema
+    recovery_service.py       # injects repos into intelligence.recovery; maps to schema
+    alerts_service.py         # injects repos into intelligence.alerts; maps to schema
+    recommendation_service.py # injects repos into intelligence.recommend; maps to schema
 ai/
   narrative.py        # Claude API call — RAG-grounded narrative, cached per user/day
   rag.py              # pgvector cosine similarity search for knowledge injection
@@ -110,16 +139,22 @@ intelligence/
 
 ```
 ingestion/
-  workout.py            # Garmin → workouts table
-  sleep.py              # Garmin → sleep_sessions table
-  environment.py        # OpenWeatherMap + Ambee → environment_data table
-  workout_metrics.py    # Garmin → workout_metrics time-series table
+  okgarmin_connection.py  # shared singleton Garmin client; token-cached at ~/.garmin_tokens
+                          # get_garmin_client() / reset_garmin_client() — used by all ingestion fns
+  workout.py            # collect_workout_data(db, user_id, client) → workouts table
+  sleep.py              # collect_sleep_data(db, user_id, client) → sleep_sessions table
+  environment.py        # collect_environment_data(db) → environment_data table
+                        # WARNING: hardcoded user_id=1 — not yet multi-user
+  workout_metrics.py    # collect_workout_metrics(db, user_id, client) → workout_metrics table
 ```
+
+All ingestion functions are async and accept an injected Garmin client. Primary invocation is via `POST /api/v1/sync/garmin`. Each file also has a `__main__` block for CLI fallback.
 
 ### CLI Tools — `cli/`
 
 ```
 cli/
+  main.py               # CLI entry point
   checkin.py            # morning readiness + post-workout reflection (terminal)
   daily_subjective.py   # daily subjective input CLI
   strength_log.py       # gym session logger (superseded by API, kept for terminal use)
@@ -129,7 +164,8 @@ cli/
 
 ```
 db/
-  session.py            # psycopg2 get_connection() — used only by intelligence/ (pending migration)
+  session.py            # psycopg2 get_connection() — used only by cli/ and scripts/
+                        # NOTE: also defines a stale async engine; canonical async engine lives in deps.py
   schema.sql            # canonical PostgreSQL schema
 ```
 
@@ -137,18 +173,37 @@ db/
 
 ```
 scripts/
-  check_connections.py       # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
-  backfill_workouts.py       # one-time: backfilled historical Garmin workouts
-  backfill_sleep.py          # one-time: backfilled historical sleep data
+  check_connections.py        # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
+  backfill_workouts.py        # one-time: backfilled historical Garmin workouts
+  backfill_sleep.py           # one-time: backfilled historical sleep data
   backfill_workout_metrics.py # one-time: backfilled workout_metrics time-series
-  ingest_knowledge.py        # one-time: embed coaching transcripts into pgvector
-  import_wger.py             # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
-  import_exercises.py        # one-time: imported 36 custom exercises
-  migrate_cascade.py         # schema migration helper
-  populate_tables.py         # seed script for dev/test data
-  populate_tables2.py        # seed script (extended)
-  dump_tables.py             # dump table contents for inspection
-  debug_sleep.py             # sleep data debug utility
+  ingest_knowledge.py         # one-time: embed coaching transcripts into pgvector
+  import_wger.py              # one-time: imported 761 exercises from wger API (Claude Haiku-labeled)
+  import_exercises.py         # one-time: imported 36 custom exercises
+  migrate_cascade.py          # schema migration helper
+  populate_tables.py          # seed 90 days of demo data (workouts, sleep, readiness, reflections)
+  populate_tables2.py         # seed exercises, workout_metrics, strength sessions
+  seed_docker.sh              # Docker entrypoint for seed service — polls for user then runs both populate scripts
+  dump_tables.py              # dump table contents for inspection
+  debug_sleep.py              # sleep data debug utility
+```
+
+### Tests — `tests/`
+
+```
+tests/
+  conftest.py, pytest.ini
+  test_config.py, test_db.py, test_environment.py, test_sleep.py,
+  test_strength_log.py, test_workout.py
+```
+
+### Docs & Samples
+
+```
+docs/
+  DECISIONS.md          # architecture decision records
+  *.plantuml            # DB schema + flow diagrams
+samples/                # raw Garmin API response samples + terrain curve visualization
 ```
 
 ### Knowledge Base — `knowledge/`
@@ -183,16 +238,32 @@ api/
   sleep.js, running.js, sync.js
 ```
 
-### Root-Level (`QuantifiedStrides/`)
+### Root-Level (`QuantifiedStrides-main/`)
+
+```
+docker-compose.yml      # orchestrates db, backend, frontend, seed services
+```
+
+### Backend Root (`QuantifiedStrides/`)
 
 ```
 main.py                 # FastAPI app entry point (imports app from routers, registers middleware)
 deps.py                 # shared FastAPI dependencies: get_db(), get_current_user_id(),
-                        # repo factories (get_user_repo, get_workout_repo, get_strength_repo,
-                        # get_checkin_repo, get_sleep_repo) — all injected via Depends()
+                        # repo factories — get_user_repo, get_workout_repo, get_strength_repo,
+                        #   get_checkin_repo, get_sleep_repo, get_workout_metrics_repo
+                        # service factories — get_running_service, get_dashboard_service
+                        # all injected via Depends() per request
 requirements.txt
-docker-compose.yml
+Dockerfile              # python:3.11-slim image; installs requirements, runs uvicorn
+.dockerignore
 .env / .env.example
+```
+
+### Frontend Root (`frontend/`)
+
+```
+Dockerfile              # multi-stage: node:20-alpine build → nginx:alpine serve
+nginx.conf              # serves React SPA on port 80, proxies /api/ to backend:8000
 ```
 
 ## Database Schema (PostgreSQL)
@@ -282,15 +353,17 @@ Narrative is **cached** keyed by sports preferences — cache busts when sport p
 3. `POST /api/v1/login` — returns JWT (30-day expiry)
 4. All protected routes: `Authorization: Bearer <token>` → `get_current_user()` extracts `user_id`
 
-**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services — the app is multi-user from the start.
+**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services. **Exception:** `ingestion/environment.py` currently hardcodes `user_id=1` — known bug, pending fix.
 
 ## Garmin Sync
 
 Two paths:
-1. **Manual scripts** (`workout.py`, `sleep.py`, `environment.py`) — run directly from terminal
-2. **API trigger** (`POST /api/v1/sync/garmin`) — frontend "Sync" button calls this
+1. **API trigger** (`POST /api/v1/sync/garmin`) — primary path; frontend "Sync" button
+2. **CLI fallback** — each ingestion file has a `__main__` block for direct execution
 
-Garmin credentials stored in `user_profile` table (per user), not in `.env`. The sync router fetches them at runtime.
+**Shared client**: `ingestion/okgarmin_connection.py` provides a singleton `get_garmin_client()` with token caching at `~/.garmin_tokens`. Auth errors trigger `reset_garmin_client()` and re-login.
+
+**Garmin credentials**: currently loaded from `.env` via `core/config.py` (`GARMIN_EMAIL`, `GARMIN_PASSWORD`) — global, not per-user. Per-user credential storage in `user_profile` is the intended architecture but not yet implemented.
 
 **Deduplication**: `workouts` has `UNIQUE (user_id, start_time)` — re-running sync won't create duplicates.
 
@@ -325,17 +398,18 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - Profile: sport picker, training goal, gym days/week, Garmin credentials
 - Narrative cache (`narrative_cache` table) keyed by sports preferences — busts on profile change
 - pgvector RAG knowledge base (`knowledge_chunks` table + `ai/rag.py`); coaching transcripts in `knowledge/`
-- Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
+- Running biomechanics page wired end-to-end: `intelligence/analytics/biomechanics.py` → `services/running_service.py` → `api/v1/running.py` → `frontend/src/pages/Running.jsx`
 - `workout_metrics` time-series seeded with real data; `exercises` table seeded (~797 exercises)
-- **Repository layer** (`repos/`): all SQL centralized into 8 domain repos injected via FastAPI `Depends`. Services accept repo instances; no raw SQL in services or API handlers. `knowledge_repo` and `narrative_repo` instantiated directly at call sites (no factory needed).
+- **Repository layer** (`repos/`): all SQL centralized into 9 domain repos injected via FastAPI `Depends`. Services accept repo instances; no raw SQL in services or API handlers. `knowledge_repo` and `narrative_repo` instantiated directly at call sites (no factory needed).
+- **Intelligence layer fully async**: `intelligence/` modules (training_load, recovery, alerts, recommend, all analytics) use async SQLAlchemy via injected repos — no psycopg2, no `asyncio.to_thread`. Service wrappers live in `services/intelligence/`.
 
 ## What's Half-Built
 
 - **Exercise suggestions on Dashboard** — recommendation engine outputs them, Dashboard UI doesn't display them yet
 - **Goal-based recommendation differentiation** — athlete vs strength vs hypertrophy logic not fully separated
-- **workout_metrics API ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; live ingestion on Garmin sync not fully wired
-- **Intelligence layer still on psycopg2** — `intelligence/training_load.py`, `recovery.py`, `alerts.py`, `recommend.py`, `analytics/` use psycopg2 directly (via `db/session.py` `get_connection()`); bridged to async API via `asyncio.to_thread()` in `services/adapters/`. Migration to async SQLAlchemy + repos is the next infra task.
-- **Ingestion scripts still on psycopg2** — `ingestion/workout.py`, `sleep.py`, `environment.py`, `workout_metrics.py` use psycopg2; pending migration to repos.
+- **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
+- **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
+- **`db/session.py` stale async engine** — defines a second `create_async_engine` instance alongside the canonical one in `deps.py`; ingestion files use the `db/session` one. Should be consolidated so there is a single engine/pool.
 
 ## What Doesn't Exist Yet
 

@@ -37,7 +37,6 @@ class CheckinRepo:
             """),
             {"user_id": user_id, **data},
         )
-        await self.db.commit()
         return result.fetchone()
 
     async def get_readiness(self, user_id: int, entry_date: date):
@@ -81,7 +80,6 @@ class CheckinRepo:
             """),
             {"user_id": user_id, **data},
         )
-        await self.db.commit()
         return result.fetchone()
 
     async def get_reflection(self, user_id: int, entry_date: date):
@@ -117,7 +115,6 @@ class CheckinRepo:
                 UNIQUE (user_id, entry_date)
             )
         """))
-        await self.db.commit()
 
     async def upsert_journal(self, user_id: int, data: dict):
         result = await self.db.execute(
@@ -131,7 +128,6 @@ class CheckinRepo:
             """),
             {"user_id": user_id, **data},
         )
-        await self.db.commit()
         return result.fetchone()
 
     async def get_journal(self, user_id: int, entry_date: date):

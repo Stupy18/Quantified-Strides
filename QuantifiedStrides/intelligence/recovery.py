@@ -21,20 +21,26 @@ Fatigue is accumulated from TWO sources:
 
 Time resolution is fractional days (hours), not integer days, so the graph
 moves continuously as the session recedes into the past.
-
-Used by the recommendation engine to prefer muscles that are more recovered
-when two exercises score similarly on the main deficit × quality_fit ranking.
 """
 
 import math
 from datetime import datetime, timedelta, time as dtime
+
+from repos.sleep_repo import SleepRepo
+from repos.strength_repo import StrengthRepo
+from repos.workout_repo import WorkoutRepo
 
 
 # ---------------------------------------------------------------------------
 # HRV trend
 # ---------------------------------------------------------------------------
 
-def get_hrv_status(cur, today, window=7, user_id=1):
+async def get_hrv_status(
+    sleep_repo: SleepRepo,
+    today,
+    window: int = 7,
+    user_id: int = 1,
+) -> dict:
     """
     Compare today's HRV against a rolling personal baseline.
 
@@ -47,29 +53,22 @@ def get_hrv_status(cur, today, window=7, user_id=1):
         trend      : 'rising' | 'stable' | 'falling'  (3-day vs 7-day mean)
     """
     start = today - timedelta(days=window + 4)
-    cur.execute("""
-        SELECT sleep_date, overnight_hrv
-        FROM sleep_sessions
-        WHERE user_id = %s
-          AND sleep_date BETWEEN %s AND %s
-          AND overnight_hrv IS NOT NULL
-        ORDER BY sleep_date
-    """, (user_id, start, today))
-    rows = cur.fetchall()
+    rows  = await sleep_repo.get_hrv_series(user_id, start, today)
 
     if len(rows) < 3:
         return {"status": "no_data", "last_hrv": None, "baseline": None,
                 "baseline_sd": None, "deviation": None, "trend": None}
 
-    last_date, last_hrv = rows[-1]
-    baseline_rows = [r[1] for r in rows if r[0] < last_date][-window:]
+    last_date = rows[-1].sleep_date
+    last_hrv  = rows[-1].overnight_hrv
+    baseline_rows = [r.overnight_hrv for r in rows if r.sleep_date < last_date][-window:]
     if len(baseline_rows) < 3:
         return {"status": "no_data", "last_hrv": last_hrv, "baseline": None,
                 "baseline_sd": None, "deviation": None, "trend": None}
 
-    mean  = sum(baseline_rows) / len(baseline_rows)
-    sd    = math.sqrt(sum((v - mean) ** 2 for v in baseline_rows) / len(baseline_rows))
-    sd    = max(sd, 1.0)
+    mean = sum(baseline_rows) / len(baseline_rows)
+    sd   = math.sqrt(sum((v - mean) ** 2 for v in baseline_rows) / len(baseline_rows))
+    sd   = max(sd, 1.0)
 
     deviation = (last_hrv - mean) / sd
     if deviation > 0.5:
@@ -79,7 +78,7 @@ def get_hrv_status(cur, today, window=7, user_id=1):
     else:
         status = "normal"
 
-    recent3   = [r[1] for r in rows[-3:]]
+    recent3   = [r.overnight_hrv for r in rows[-3:]]
     trend_val = sum(recent3) / len(recent3) - mean
     if trend_val > 3:
         trend = "rising"
@@ -131,18 +130,9 @@ _HALF_LIFE = {
 _DEFAULT_HALF_LIFE = 2.0
 
 # Max accumulated load before freshness hits 0.
-# Calibrated to one hard strength session:
-#   e.g. 4 exercises × 4 sets × systemic_fatigue 3 = 48 primary load units
-# An equivalent long/hard endurance session approaches this from the sport map.
 _FATIGUE_CAP = 50.0
 
-# Endurance sport → muscle load map.
-# Values are load units per hour of activity, using the same scale as
-# strength load = systemic_fatigue × num_sets (typical hard set ≈ 3 units).
-# Calibration examples:
-#   1-hour easy run    → quads ~8  → 8/50 = 16% fatigue  → 84% fresh  ✓
-#   2-hour long run    → quads 16  → 32%  fatigue  → 68% fresh  ✓
-#   2-hour bouldering  → forearms 30 → 60% fatigue → 40% fresh  ✓
+# Endurance sport → muscle load map (load units per hour of activity).
 _SPORT_MUSCLE_MAP: dict[str, dict[str, dict[str, float]]] = {
     "running": {
         "primary":   {"quads": 8.0, "calves": 8.0, "glutes": 5.0},
@@ -207,99 +197,65 @@ def _decay(peak: float, half_life: float, t_days: float) -> float:
 def _t_days_from_end(end_dt: datetime, now: datetime) -> float:
     """
     Fractional days elapsed since a workout ended.
-    Strips timezone info if present (DB timestamps vs naive datetime.now()).
-    Clamped to a minimum of 15 minutes to avoid division artifacts.
+    Strips timezone info if present. Clamped to a minimum of 15 minutes.
     """
     if end_dt.tzinfo is not None:
         end_dt = end_dt.replace(tzinfo=None)
     elapsed = (now - end_dt).total_seconds()
-    return max(elapsed / 86400, 15 / 1440)   # min 15 minutes
+    return max(elapsed / 86400, 15 / 1440)
 
 
-def get_muscle_freshness(cur, today, lookback: int = 14, user_id: int = 1) -> dict:
+async def get_muscle_freshness(
+    strength_repo: StrengthRepo,
+    workout_repo: WorkoutRepo,
+    today,
+    lookback: int = 14,
+    user_id: int = 1,
+) -> dict:
     """
     Compute a freshness score (0–1) per muscle based on residual fatigue decay.
     1.0 = fully recovered, 0.0 = maximally fatigued.
-
-    Accumulates fatigue from:
-      - strength_sessions (load = systemic_fatigue × num_sets per exercise)
-      - workouts (non-strength sports, load = load_per_hour × duration_h)
-
-    Returns dict: muscle → freshness float
     """
     now   = datetime.now()
     start = today - timedelta(days=lookback)
     fatigue: dict[str, float] = {}
 
     # ── 1. Strength session fatigue ──────────────────────────────────────────
-    cur.execute("""
-        SELECT ss.session_date,
-               e.primary_muscles,
-               e.secondary_muscles,
-               e.systemic_fatigue,
-               COUNT(st.set_id) AS num_sets
-        FROM strength_sessions ss
-        JOIN strength_exercises se ON se.session_id = ss.session_id
-        LEFT JOIN exercises e ON e.name = se.name
-        JOIN strength_sets st ON st.exercise_id = se.exercise_id
-        WHERE ss.user_id = %s
-          AND ss.session_date BETWEEN %s AND %s
-        GROUP BY ss.session_date, se.exercise_id,
-                 e.primary_muscles, e.secondary_muscles, e.systemic_fatigue
-    """, (user_id, start, today))
-
-    for session_date, primary, secondary, systemic, num_sets in cur.fetchall():
-        # Strength sessions have date only — assume noon for time resolution
-        session_dt = datetime.combine(session_date, dtime(12, 0))
+    strength_rows = await strength_repo.get_strength_fatigue_data(user_id, start, today)
+    for row in strength_rows:
+        session_dt = datetime.combine(row.session_date, dtime(12, 0))
         t_days = _t_days_from_end(session_dt, now)
-        load   = float(systemic or 2) * float(num_sets)
+        load   = float(row.systemic_fatigue or 2) * float(row.num_sets)
 
-        for muscle in (primary or []):
+        for muscle in (row.primary_muscles or []):
             hl = _HALF_LIFE.get(muscle, _DEFAULT_HALF_LIFE)
             fatigue[muscle] = fatigue.get(muscle, 0.0) + _decay(load, hl, t_days)
 
-        for muscle in (secondary or []):
+        for muscle in (row.secondary_muscles or []):
             hl = _HALF_LIFE.get(muscle, _DEFAULT_HALF_LIFE)
             fatigue[muscle] = fatigue.get(muscle, 0.0) + _decay(load * 0.4, hl, t_days)
 
     # ── 2. Endurance workout fatigue ─────────────────────────────────────────
-    # TSS (Training Stress Score) is used to scale load by intensity:
-    #   intensity_factor = (tss / duration_h) / REFERENCE_TSS_PER_HOUR
-    # At the reference (60 TSS/h ≈ steady Z2/Z3 effort), factor = 1.0.
-    # An easy Z1 run (~40 TSS/h) scales load down to 0.67×.
-    # A threshold session (~90 TSS/h) scales load up to 1.5×.
-    # Clamped to [0.5, 2.0] to handle outliers and NULL TSS (falls back to 1.0).
+    # TSS intensity factor: at 60 TSS/h (steady Z2/Z3), factor = 1.0.
+    # Clamped to [0.5, 2.0]; falls back to 1.0 when TSS is NULL.
     _REFERENCE_TSS_PER_HOUR = 60.0
 
-    cur.execute("""
-        SELECT sport,
-               end_time,
-               workout_date,
-               EXTRACT(EPOCH FROM COALESCE(end_time - start_time,
-                                           INTERVAL '1 hour'))::float / 3600 AS duration_h,
-               training_stress_score::float
-        FROM workouts
-        WHERE user_id = %s
-          AND workout_date BETWEEN %s AND %s
-          AND sport != 'strength_training'
-    """, (user_id, start, today))
-
-    for sport, end_time, workout_date, duration_h, tss in cur.fetchall():
-        muscle_map = _SPORT_MUSCLE_MAP.get(sport)
+    endurance_rows = await workout_repo.get_endurance_fatigue_data(user_id, start, today)
+    for row in endurance_rows:
+        muscle_map = _SPORT_MUSCLE_MAP.get(row.sport)
         if not muscle_map:
             continue
 
-        # Use actual end_time when available; otherwise assume 20:00 that day
-        if end_time is not None:
-            ref_dt = end_time if isinstance(end_time, datetime) \
-                     else datetime.combine(workout_date, end_time)
+        if row.end_time is not None:
+            ref_dt = row.end_time if isinstance(row.end_time, datetime) \
+                     else datetime.combine(row.workout_date, row.end_time)
         else:
-            ref_dt = datetime.combine(workout_date, dtime(20, 0))
+            ref_dt = datetime.combine(row.workout_date, dtime(20, 0))
 
         t_days     = _t_days_from_end(ref_dt, now)
-        duration_h = float(duration_h or 1.0)
+        duration_h = float(row.duration_h or 1.0)
+        tss        = row.training_stress_score
 
-        # TSS intensity factor — falls back to 1.0 when TSS is NULL
         if tss and duration_h > 0:
             intensity_factor = float(tss) / duration_h / _REFERENCE_TSS_PER_HOUR
             intensity_factor = max(0.5, min(2.0, intensity_factor))
@@ -316,7 +272,6 @@ def get_muscle_freshness(cur, today, lookback: int = 14, user_id: int = 1) -> di
             hl   = _HALF_LIFE.get(muscle, _DEFAULT_HALF_LIFE)
             fatigue[muscle] = fatigue.get(muscle, 0.0) + _decay(load, hl, t_days)
 
-    # Convert to freshness (1 = fully fresh, 0 = maximally loaded)
     return {
         muscle: round(1.0 - min(1.0, f / _FATIGUE_CAP), 3)
         for muscle, f in fatigue.items()
