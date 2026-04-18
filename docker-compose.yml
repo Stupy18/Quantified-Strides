@@ -38,12 +38,15 @@ services:
       - garmin_tokens:/root/.garmin_tokens
 
   seed:
+    build: ./QuantifiedStrides
     image: quantifiedstrides-backend
     container_name: quantifiedstrides_seed
     restart: "no"
     depends_on:
       db:
         condition: service_healthy
+      backend:
+        condition: service_started
     env_file:
       - ./QuantifiedStrides/.env
     environment:
