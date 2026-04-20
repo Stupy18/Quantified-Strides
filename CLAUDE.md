@@ -91,7 +91,8 @@ api/v1/
 repos/                # repository layer — all SQL lives here, injected via FastAPI Depends
   user_repo.py             # users + user_profile queries
   workout_repo.py          # workouts table queries + intelligence helpers
-  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain)
+  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain,
+                           #   grade-adjusted pace/speed, performance condition, speed_ms series)
   strength_repo.py         # strength_sessions, strength_exercises, strength_sets, exercises queries
   sleep_repo.py            # sleep_sessions queries
   checkin_repo.py          # daily_readiness, workout_reflection, journal_entries queries
@@ -141,7 +142,8 @@ intelligence/
 ingestion/
   okgarmin_connection.py  # shared singleton Garmin client; token-cached at ~/.garmin_tokens
                           # get_garmin_client() / reset_garmin_client() — used by all ingestion fns
-  workout.py            # collect_workout_data(db, user_id, client) → workouts table
+  workout.py            # collect_workout_data(db, user_id, client) → workouts + satellite tables
+                        #   (workout_hr_zones, workout_run_biomechanics, workout_power_summary)
   sleep.py              # collect_sleep_data(db, user_id, client) → sleep_sessions table
   environment.py        # collect_environment_data(db) → environment_data table
                         # WARNING: hardcoded user_id=1 — not yet multi-user
@@ -156,7 +158,7 @@ All ingestion functions are async and accept an injected Garmin client. Primary 
 cli/
   main.py               # CLI entry point
   checkin.py            # morning readiness + post-workout reflection (terminal)
-  daily_subjective.py   # daily subjective input CLI
+  daily_subjective.py   # DEPRECATED — backing table (daily_subjective) was dropped; kept for reference only
   strength_log.py       # gym session logger (superseded by API, kept for terminal use)
 ```
 
@@ -174,7 +176,7 @@ db/
 ```
 scripts/
   check_connections.py        # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
-  backfill_workouts.py        # one-time: backfilled historical Garmin workouts
+  backfill_workouts.py        # one-time: backfilled historical Garmin workouts (writes to satellite tables)
   backfill_sleep.py           # one-time: backfilled historical sleep data
   backfill_workout_metrics.py # one-time: backfilled workout_metrics time-series
   ingest_knowledge.py         # one-time: embed coaching transcripts into pgvector
@@ -184,6 +186,7 @@ scripts/
   populate_tables.py          # seed 90 days of demo data (workouts, sleep, readiness, reflections)
   populate_tables2.py         # seed exercises, workout_metrics, strength sessions
   seed_docker.sh              # Docker entrypoint for seed service — polls for user then runs both populate scripts
+                              # NOTE: entrypoint uses `tr -d '\r'` to strip Windows CRLF before execution
   dump_tables.py              # dump table contents for inspection
   debug_sleep.py              # sleep data debug utility
 ```
@@ -271,16 +274,32 @@ nginx.conf              # serves React SPA on port 80, proxies /api/ to backend:
 ```
 users                      (email_verified BOOLEAN, verification_token — proper auth columns)
   └─ user_profile          (FK: user_id — goal, gym_days_week, primary_sports JSONB)
-  └─ workouts              (FK: user_id — sport, HR zones, VO2max, biomechanics, GPS)
-       ├─ environment_data (FK: workout_id nullable — weather, UV, pollen per session)
-       └─ workout_metrics  (FK: workout_id — time-series HR, pace, cadence, power; seeded)
+  └─ workouts              (FK: user_id — sport, distance_m, avg_cadence, VO2max, GPS,
+                                          garmin_activity_id, primary_benefit, training_load_score,
+                                          avg/max_respiration_rate; core fields only — zones/bio/power
+                                          in satellite tables)
+       ├─ workout_hr_zones        (FK: workout_id — zone SMALLINT + seconds; PRIMARY KEY (workout_id, zone))
+       ├─ workout_run_biomechanics(FK: workout_id PK — avg_vertical_oscillation, avg_stance_time,
+                                                        avg_stride_length, avg_vertical_ratio,
+                                                        avg_running_cadence, max_running_cadence)
+       ├─ workout_power_summary   (FK: workout_id PK — normalized_power, avg_power, max_power,
+                                                        training_stress_score)
+       ├─ environment_data        (FK: workout_id nullable — weather, UV, pollen per session;
+                                                        record_date DATE GENERATED from record_datetime)
+       └─ workout_metrics         (FK: workout_id — time-series: heart_rate, pace, cadence,
+                                                        vertical_oscillation, vertical_ratio, stance_time,
+                                                        power, lat/lon, altitude, distance, gradient_pct,
+                                                        stride_length, grade_adjusted_pace, body_battery,
+                                                        vertical_speed, speed_ms, grade_adjusted_speed_ms,
+                                                        performance_condition, respiration_rate;
+                                                        UNIQUE (workout_id, metric_timestamp); seeded)
   └─ sleep_sessions        (FK: user_id — duration, score, HRV, stages, Body Battery)
   └─ daily_readiness       (FK: user_id — overall/legs/upper/joint feel, time_available,
                                           going_out_tonight)
-  └─ workout_reflection    (FK: user_id — session RPE, quality, load_feel, notes)
-  └─ daily_subjective      (FK: user_id — mood, energy, stress, notes)
+  └─ workout_reflection    (FK: user_id — session RPE, quality, load_feel, notes,
+                                          workout_id FK → workouts ON DELETE SET NULL)
   └─ strength_sessions     (FK: user_id; seeded with strength training workouts)
-       └─ strength_exercises (FK: session_id)
+       └─ strength_exercises (FK: session_id; exercise_ref_id FK → exercises ON DELETE SET NULL)
             └─ strength_sets (FK: exercise_id — weight, reps, rpe)
   └─ narrative_cache       (FK: user_id — date + cache_key UNIQUE; busts on sport change)
   └─ nutrition_log         (FK: user_id — schema defined, not implemented)
@@ -294,13 +313,22 @@ knowledge_chunks           (pgvector: coaching transcript embeddings for RAG)
 
 **Key schema notes:**
 - `users` has `email_verified` and `verification_token` columns for the email verification flow
-- `environment_data.workout_id` is nullable — NULL means a rest day (no placeholder workouts)
 - `workouts` has `UNIQUE (user_id, start_time)` — duplicate detection on ingest
+- `workouts.distance_m` stores metres of distance (renamed from the ambiguous `training_volume`)
+- `workouts.avg_cadence` stores session-level cadence for all sports (running: steps/min; cycling: rpm)
+- HR zones are normalised into `workout_hr_zones` — supports 3–6 zone configs; TRIMP reads from here
+- Running biomechanics (GCT, oscillation, stride) are in `workout_run_biomechanics`; column is `avg_stance_time` (Garmin fit-file name) not `avg_ground_contact_time`
+- `workout_metrics.stance_time` matches the Garmin fit-file field name (`directGroundContactTime` maps to `stance_time`)
+- `environment_data.workout_id` is nullable — NULL means a rest day (no placeholder workouts)
+- `environment_data.record_date` is a `GENERATED ALWAYS AS (record_datetime::date) STORED` column — use it in WHERE clauses instead of casting
 - `daily_readiness` captures `going_out_tonight` (social schedule affects tomorrow's training)
-- `workout_reflection.load_feel` is a -2 to +2 scale (too easy → too hard) — used to calibrate future recommendations
+- `workout_reflection.load_feel` is a -2 to +2 scale (too easy → too hard) — used to calibrate future recommendations; `workout_id` FK links the reflection to the specific workout
+- `strength_exercises.exercise_ref_id` FK links logged exercises to the `exercises` taxonomy — auto-populated on insert via case-insensitive name match
 - `user_profile.primary_sports` is JSONB — keys are sport slugs, values are priority weights
 - `narrative_cache` is keyed by `(user_id, date, cache_key)` — cache_key is an MD5 of sports preferences; busts when sport profile changes
+- `workouts.garmin_activity_id` has a partial UNIQUE index (`WHERE garmin_activity_id IS NOT NULL`); `primary_benefit` and `training_load_score` are Garmin-sourced training adaptation metadata; `avg/max_respiration_rate` are session summaries
 - `workout_metrics`, `exercises`, and `strength_sessions` are seeded with real data
+- `daily_subjective` table was dropped (superseded by `daily_readiness`)
 
 ## Intelligence Layer — How It Works
 

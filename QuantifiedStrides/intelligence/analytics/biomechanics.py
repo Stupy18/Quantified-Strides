@@ -73,13 +73,13 @@ async def get_fatigue_signature(
             return None
         return round((late_avg - early_avg) / early_avg * 100, 2)
 
-    # rows: (metric_timestamp, heart_rate, pace, cadence, ground_contact_time, vertical_oscillation)
-    # 0-based indices after timestamp: hr=1, pace=2, cadence=3, gct=4, vo=5
+    # rows: (metric_timestamp, heart_rate, pace, cadence, stance_time, vertical_oscillation)
+    # 0-based indices after timestamp: hr=1, pace=2, cadence=3, stance=4, vo=5
     metrics = {
         "heart_rate":           1,
         "pace":                 2,
         "cadence":              3,
-        "ground_contact_time":  4,
+        "stance_time":  4,
         "vertical_oscillation": 5,
     }
 
@@ -100,8 +100,8 @@ async def get_fatigue_signature(
 
     # Summary: overall fatigue score (0-100, higher = more fatigued)
     scores = []
-    if result.get("ground_contact_time_drift_pct") is not None:
-        scores.append(min(100, max(0, result["ground_contact_time_drift_pct"] * 5)))
+    if result.get("stance_time_drift_pct") is not None:
+        scores.append(min(100, max(0, result["stance_time_drift_pct"] * 5)))
     if result.get("heart_rate_drift_pct") is not None:
         scores.append(min(100, max(0, result["heart_rate_drift_pct"] * 10)))
     if result.get("cadence_drift_pct") is not None:
@@ -218,7 +218,7 @@ async def get_biomechanics_trends(
             "workout_id":   w.workout_id,
             "workout_date": w.workout_date,
             "sport":        w.sport,
-            "distance_km":  round((w.training_volume or 0) / 1000, 2),
+            "distance_km":  round((w.distance_m or 0) / 1000, 2),
         }
 
         if bio:
@@ -238,7 +238,7 @@ async def get_biomechanics_trends(
             row.update({
                 "fatigue_score":     fat["fatigue_score"],
                 "cadence_drift_pct": fat["cadence_drift_pct"],
-                "gct_drift_pct":     fat["ground_contact_time_drift_pct"],
+                "gct_drift_pct":     fat["stance_time_drift_pct"],
                 "hr_drift_pct":      fat["heart_rate_drift_pct"],
             })
         else:

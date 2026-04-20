@@ -13,7 +13,7 @@ class WorkoutMetricsRepo:
         result = await self.db.execute(
             text("""
                 SELECT metric_timestamp, heart_rate, pace, cadence,
-                       ground_contact_time, vertical_oscillation
+                       stance_time, vertical_oscillation
                 FROM workout_metrics
                 WHERE workout_id = :wid
                   AND pace IS NOT NULL AND pace > 0 AND pace < 20
@@ -45,8 +45,8 @@ class WorkoutMetricsRepo:
                 SELECT
                     AVG(cadence)                 AS avg_cadence,
                     STDDEV(cadence)              AS std_cadence,
-                    AVG(ground_contact_time)     AS avg_gct,
-                    STDDEV(ground_contact_time)  AS std_gct,
+                    AVG(stance_time)     AS avg_gct,
+                    STDDEV(stance_time)  AS std_gct,
                     AVG(vertical_oscillation)    AS avg_vo,
                     STDDEV(vertical_oscillation) AS std_vo,
                     AVG(vertical_ratio)          AS avg_vr,
@@ -100,6 +100,49 @@ class WorkoutMetricsRepo:
                 WHERE workout_id = :wid
                   AND pace IS NOT NULL AND pace > 0 AND pace < 20
                   AND power IS NOT NULL AND power > 0
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return result.fetchall()
+
+    async def get_speed_ms_series(self, workout_id: int):
+        """Raw speed (m/s) + power series for REI without pace conversion loss."""
+        result = await self.db.execute(
+            text("""
+                SELECT speed_ms, power
+                FROM workout_metrics
+                WHERE workout_id = :wid
+                  AND speed_ms IS NOT NULL AND speed_ms > 0
+                  AND power IS NOT NULL AND power > 0
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return result.fetchall()
+
+    async def get_grade_adjusted_series(self, workout_id: int):
+        """Grade-adjusted pace + speed_ms for terrain-normalised economy trend."""
+        result = await self.db.execute(
+            text("""
+                SELECT grade_adjusted_pace, grade_adjusted_speed_ms
+                FROM workout_metrics
+                WHERE workout_id = :wid
+                  AND grade_adjusted_pace IS NOT NULL AND grade_adjusted_pace > 0
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return result.fetchall()
+
+    async def get_performance_condition_series(self, workout_id: int):
+        """Per-second performance condition for real-time fatigue analysis."""
+        result = await self.db.execute(
+            text("""
+                SELECT metric_timestamp, performance_condition
+                FROM workout_metrics
+                WHERE workout_id = :wid
+                  AND performance_condition IS NOT NULL
                 ORDER BY metric_timestamp
             """),
             {"wid": workout_id},

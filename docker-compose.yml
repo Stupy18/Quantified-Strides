@@ -55,7 +55,7 @@ services:
       DB_NAME: quantifiedstrides
       DB_USER: quantified
       DB_PASSWORD: "2026"
-    entrypoint: ["sh", "scripts/seed_docker.sh"]
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < scripts/seed_docker.sh | /bin/sh"]
 
   frontend:
     build: ./frontend
