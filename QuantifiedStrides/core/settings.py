@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # Garmin
     garmin_sync_enabled: bool = True
 

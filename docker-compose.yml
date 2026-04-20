@@ -18,6 +18,15 @@ services:
       timeout: 5s
       retries: 15
 
+  redis:
+    image: redis:alpine
+    container_name: quantifiedstrides_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
   backend:
     build: ./QuantifiedStrides
     image: quantifiedstrides-backend
@@ -26,12 +35,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     env_file:
       - ./QuantifiedStrides/.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"
       API_CORS_ORIGINS: '["http://localhost","http://localhost:5173"]'
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
@@ -69,3 +81,4 @@ services:
 volumes:
   pgdata:
   garmin_tokens:
+  redis-data:
