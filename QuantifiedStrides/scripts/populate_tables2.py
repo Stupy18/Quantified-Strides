@@ -107,7 +107,7 @@ print("\n[2/3] Inserting workout_metrics for running workouts...")
 
 cur.execute("""
     SELECT workout_id, sport, start_time, end_time,
-           avg_heart_rate, training_volume, elevation_gain
+           avg_heart_rate, distance_m, elevation_gain
     FROM workouts
     WHERE user_id = %s
       AND sport IN ('running', 'trail_running')
@@ -197,6 +197,14 @@ def simulate_run_metrics(workout_id, sport, start_dt, end_dt,
             round(altitude, 1),
             round(distance, 1),
             round(gradient, 2),
+            None,  # stride_length
+            None,  # grade_adjusted_pace
+            None,  # body_battery
+            None,  # vertical_speed
+            round(speed_ms, 3),  # speed_ms
+            None,  # grade_adjusted_speed_ms
+            None,  # performance_condition
+            None,  # respiration_rate
         ))
         prev_alt = altitude
 
@@ -213,10 +221,12 @@ for wid, sport, start_dt, end_dt, avg_hr, distance_m, elev_gain in running_worko
         INSERT INTO workout_metrics (
             workout_id, metric_timestamp,
             heart_rate, pace, cadence,
-            vertical_oscillation, vertical_ratio, ground_contact_time,
-            power, latitude, longitude, altitude, distance, gradient_pct
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
+            vertical_oscillation, vertical_ratio, stance_time,
+            power, latitude, longitude, altitude, distance, gradient_pct,
+            stride_length, grade_adjusted_pace, body_battery, vertical_speed,
+            speed_ms, grade_adjusted_speed_ms, performance_condition, respiration_rate
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (workout_id, metric_timestamp) DO NOTHING
     """, rows)
     total_metrics += len(rows)
 
@@ -253,28 +263,44 @@ for session_id, session_date in sessions:
     z3 = int(duration * 0.4)
     z4 = int(duration * 0.2)
     z1 = duration - z2 - z3 - z4
+    tss = round(random.uniform(40, 70), 1)
 
     cur.execute("""
         INSERT INTO workouts (
             user_id, sport, start_time, end_time, workout_type,
             calories_burned, avg_heart_rate, max_heart_rate,
-            time_in_hr_zone_1, time_in_hr_zone_2, time_in_hr_zone_3,
-            time_in_hr_zone_4, time_in_hr_zone_5,
-            workout_date, training_stress_score,
+            workout_date,
             aerobic_training_effect, anaerobic_training_effect
         ) VALUES (%s,'strength_training',%s,%s,'Strength Training',
-                  %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  %s,%s,%s,%s,%s,%s)
         ON CONFLICT (user_id, start_time) DO NOTHING
+        RETURNING workout_id
     """, (
         USER_ID, start_dt, end_dt,
         random.randint(250, 450),
         random.randint(110, 130), random.randint(145, 165),
-        z1, z2, z3, z4, 0,
         session_date,
-        round(random.uniform(40, 70), 1),
         round(random.uniform(2.0, 3.5), 1),
         round(random.uniform(0.5, 1.5), 1),
     ))
+    result = cur.fetchone()
+    if not result:
+        continue
+    wid = result[0]
+
+    for zone, seconds in enumerate([z1, z2, z3, z4, 0], start=1):
+        cur.execute("""
+            INSERT INTO workout_hr_zones (workout_id, zone, seconds)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (workout_id, zone) DO UPDATE SET seconds = EXCLUDED.seconds
+        """, (wid, zone, seconds))
+
+    cur.execute("""
+        INSERT INTO workout_power_summary (workout_id, training_stress_score)
+        VALUES (%s, %s)
+        ON CONFLICT (workout_id) DO NOTHING
+    """, (wid, tss))
+
     inserted += 1
 
 conn.commit()

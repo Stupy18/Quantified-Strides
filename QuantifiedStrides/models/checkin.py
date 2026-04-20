@@ -42,11 +42,7 @@ class WorkoutReflectionCreateSchema(BaseModel):
     session_quality: int = Field(ge=1, le=10)
     notes: str | None = None
     load_feel: int | None = Field(default=None, ge=-2, le=2)
-    """
-    Perceived load vs expectation.
-    -2 = much too easy, -1 = slightly easy, 0 = just right,
-     1 = slightly hard,  2 = too hard.
-    """
+    workout_id: int | None = None
 
 
 class WorkoutReflectionSchema(BaseModel):
@@ -57,6 +53,7 @@ class WorkoutReflectionSchema(BaseModel):
     session_quality: int
     notes: str | None
     load_feel: int | None
+    workout_id: int | None = None
 
 
 # ---------------------------------------------------------------------------

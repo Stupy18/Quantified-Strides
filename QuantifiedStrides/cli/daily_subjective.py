@@ -1,3 +1,7 @@
+# DEPRECATED: daily_subjective table was dropped (migration 007).
+# Superseded by daily_readiness. This file is kept for reference only.
+# Do not run — the backing table no longer exists.
+
 from datetime import datetime
 
 from db.session import get_connection

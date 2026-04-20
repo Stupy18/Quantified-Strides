@@ -10,7 +10,7 @@ class EnvironmentRepo:
 
     async def exists_for_date(self, d: date) -> bool:
         result = await self.db.execute(
-            text("SELECT 1 FROM environment_data WHERE record_datetime::date = :d LIMIT 1"),
+            text("SELECT 1 FROM environment_data WHERE record_date = :d LIMIT 1"),
             {"d": d},
         )
         return result.fetchone() is not None
