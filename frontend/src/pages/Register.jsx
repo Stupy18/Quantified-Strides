@@ -47,6 +47,12 @@ function StepCredentials({ data, onChange, onNext }) {
           onChange={e => onChange('confirm', e.target.value)}
           className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
       </div>
+      <div className="space-y-1">
+        <label className="text-sm font-medium">Date of birth <span className="text-muted-foreground font-normal">(optional)</span></label>
+        <input type="date" value={data.date_of_birth}
+          onChange={e => onChange('date_of_birth', e.target.value)}
+          className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+      </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -117,7 +123,7 @@ export default function Register() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState(null)
   const [data, setData]       = useState({
-    name: '', email: '', password: '', confirm: '',
+    name: '', email: '', password: '', confirm: '', date_of_birth: '',
     goal: 'athlete', gym_days_week: 3, primary_sports: {},
   })
 
@@ -135,6 +141,7 @@ export default function Register() {
         goal:           data.goal,
         gym_days_week:  data.gym_days_week,
         primary_sports: data.primary_sports,
+        ...(data.date_of_birth && { date_of_birth: data.date_of_birth }),
       })
       setStep(3)
     } catch (err) {

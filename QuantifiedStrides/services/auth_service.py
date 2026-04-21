@@ -46,12 +46,13 @@ async def register(
     goal: str,
     gym_days_week: int,
     primary_sports: dict,
+    date_of_birth=None,
 ) -> dict:
     if await repo.email_exists(email):
         raise ValueError("Email already registered")
 
     verification_token = secrets.token_urlsafe(32)
-    user_id = await repo.insert_user(name, email, hash_password(password), verification_token)
+    user_id = await repo.insert_user(name, email, hash_password(password), verification_token, date_of_birth)
     await repo.insert_profile(user_id, goal, gym_days_week, primary_sports)
     await repo.db.commit()
 
@@ -99,6 +100,7 @@ async def get_me(repo: UserRepo, user_id: int) -> dict:
         "user_id":         row.user_id,
         "name":            row.name,
         "email":           row.email,
+        "date_of_birth":   row.date_of_birth,
         "goal":            row.goal,
         "gym_days_week":   row.gym_days_week,
         "primary_sports":  row.primary_sports or {},
