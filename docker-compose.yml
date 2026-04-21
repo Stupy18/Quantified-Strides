@@ -11,12 +11,29 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./QuantifiedStrides/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U quantified -d quantifiedstrides"]
       interval: 5s
       timeout: 5s
       retries: 15
+
+  flyway:
+    image: flyway/flyway:10
+    container_name: quantifiedstrides_flyway
+    command: migrate
+    volumes:
+      - ./QuantifiedStrides/db/flyway:/flyway/sql
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/quantifiedstrides
+      FLYWAY_USER: quantified
+      FLYWAY_PASSWORD: "2026"
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "1"
+      FLYWAY_CONNECT_RETRIES: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   redis:
     image: redis:alpine
@@ -35,6 +52,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
       redis:
         condition: service_started
     env_file:
@@ -57,6 +76,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
       backend:
         condition: service_started
     env_file:

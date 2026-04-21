@@ -14,6 +14,7 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 |---|---|
 | Backend | FastAPI + SQLAlchemy async (asyncpg driver) |
 | Database | PostgreSQL (`quantifiedstrides`) via Docker (`pgvector/pgvector:pg16`) |
+| Migrations | Flyway 10 (`flyway/flyway:10` Docker service) — SQL-first versioned migrations in `db/flyway/` |
 | Frontend | React (Vite, port 5173) + shadcn/ui components |
 | Auth | JWT (HS256, 30-day expiry) + email verification via SMTP |
 | Narrative | Anthropic Claude API (`ai/narrative.py`) |
@@ -42,6 +43,8 @@ To reset the database completely:
 ```bash
 docker compose down -v && docker compose up -d
 ```
+
+Schema is managed by **Flyway** — the `flyway` service runs on every `docker compose up`, applies any pending migrations from `db/flyway/`, then exits. Backend and seed wait on `flyway: condition: service_completed_successfully` before starting.
 
 ### Local Dev (hot-reload — BE + FE only, DB still via Docker)
 
@@ -168,8 +171,17 @@ cli/
 db/
   session.py            # psycopg2 get_connection() — used only by cli/ and scripts/
                         # NOTE: also defines a stale async engine; canonical async engine lives in deps.py
-  schema.sql            # canonical PostgreSQL schema
+  schema.sql            # reference snapshot only — NOT mounted into the db container
+  flyway/
+    V001__baseline.sql  # frozen initial schema (do not edit)
+    V002__*.sql         # future migrations go here — never edit committed files
 ```
+
+**Migration rules:**
+- Flyway owns all schema changes. Never edit a committed migration file — add a new version instead.
+- Naming: `V{version}__{description}.sql` (double underscore). Version is an integer: `V002`, `V003`, etc.
+- `flyway_schema_history` table is created automatically in the DB — do not touch it.
+- `BASELINE_ON_MIGRATE=true` means: fresh DB runs V001 to create the schema; existing DB with no history table gets V001 marked as already applied, then any pending versions run.
 
 ### One-Off Scripts — `scripts/`
 

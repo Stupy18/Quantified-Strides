@@ -22,6 +22,7 @@ async def register(body: RegisterSchema, repo: UserRepo = Depends(get_user_repo)
             goal=body.goal,
             gym_days_week=body.gym_days_week,
             primary_sports=body.primary_sports,
+            date_of_birth=body.date_of_birth,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
