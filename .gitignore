@@ -4,3 +4,5 @@
 .idea/
 
 frontend/package-lock.json
+
+notebooks/config.py
