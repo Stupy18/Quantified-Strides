@@ -338,7 +338,7 @@ Output: recommended sport, session type, intensity zone, exercise suggestions.
 ### Narrative Layer (`ai/narrative.py` + `ai/rag.py`)
 
 When the dashboard loads:
-1. `rag.py` runs a pgvector cosine similarity search against `knowledge_chunks` using the current context (e.g. "Z2 base building, suppressed HRV, ankle rehab")
+1. `rag.py` runs a pgvector cosine similarity search against `knowledge_chunks` using the current context (e.g. "Z2 base building, suppressed HRV, high training load")
 2. Top-k coaching transcript chunks are retrieved and injected into the system prompt
 3. Claude API generates a narrative explanation of detected patterns — grounded in real sports science, not generic LLM output
 
@@ -353,17 +353,15 @@ Narrative is **cached** keyed by sports preferences — cache busts when sport p
 3. `POST /api/v1/login` — returns JWT (30-day expiry)
 4. All protected routes: `Authorization: Bearer <token>` → `get_current_user()` extracts `user_id`
 
-**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services. **Exception:** `ingestion/environment.py` currently hardcodes `user_id=1` — known bug, pending fix.
+**Critical:** `user_id` is always extracted from the JWT via `get_current_user()`. Never hardcoded. This applies to all routers and services — the app is multi-user from the start.
 
 ## Garmin Sync
 
 Two paths:
-1. **API trigger** (`POST /api/v1/sync/garmin`) — primary path; frontend "Sync" button
-2. **CLI fallback** — each ingestion file has a `__main__` block for direct execution
+1. **Manual scripts** (`workout.py`, `sleep.py`, `environment.py`) — run directly from terminal
+2. **API trigger** (`POST /api/v1/sync/garmin`) — frontend "Sync" button calls this
 
-**Shared client**: `ingestion/okgarmin_connection.py` provides a singleton `get_garmin_client()` with token caching at `~/.garmin_tokens`. Auth errors trigger `reset_garmin_client()` and re-login.
-
-**Garmin credentials**: currently loaded from `.env` via `core/config.py` (`GARMIN_EMAIL`, `GARMIN_PASSWORD`) — global, not per-user. Per-user credential storage in `user_profile` is the intended architecture but not yet implemented.
+Garmin credentials stored in `user_profile` table (per user), not in `.env`. The sync router fetches them at runtime.
 
 **Deduplication**: `workouts` has `UNIQUE (user_id, start_time)` — re-running sync won't create duplicates.
 
@@ -422,29 +420,33 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - Error boundaries on frontend
 - Input validation (Zod on frontend, stricter Pydantic on backend)
 
-## Vlad's Training Context (as of 2026-03-14)
+## Running Intelligence — Next Build (council-validated, 2026-04-21)
 
-**Goal:** All-around mountain athlete — XC MTB, trail running, bouldering/climbing, skiing, snowboarding, hiking.
+The biomechanics analytics layer (`intelligence/analytics/biomechanics.py`) is fully decoupled from the recommendation engine. The critical path:
 
-**Current phase:** Base building post-ankle sprain (freak climbing accident). ~4 weeks from returning to trail running. Z2 bike primary, reintroducing flat running.
+### Tier 1 — Wire biomechanics into recommend.py
+- **Run-type readiness scoring**: cadence stability + GCT drift + HR decoupling → per-run readiness signal fed into `recommend.py` as a hard modifier
+- **Within-run fatigue signature**: stance_time drift coefficient (linear regression of stance_time vs elapsed distance), cadence CV (second half vs first half), vertical_ratio deviation from personal baseline → scalar index; above 1.5 SD triggers volume reduction or sport substitution
+- **Zone calibration drift**: detect when HR zones are stale (aerobic decoupling trend crossing threshold → alert "your Z2 is now Z3 effort")
 
-**Weekly structure:**
-- Mon: Upper gym + 30 min Z2 bike
-- Tue: Climbing + 30 min Z2 bike
-- Wed: Lower gym + prehab (Copenhagen planks, tibialis raises, ankle mobility)
-- Thu: Rest or climbing (fatigue-dependent)
-- Fri: Run or XC MTB
-- Sat: Upper gym 2 (if didn't go out Fri night) + flat run
-- Sun: Lower gym 2
+### Tier 2 — Terrain stratification
+- Add `terrain_type` classification (road vs trail) derived from `gradient_pct` distribution per session
+- All biomechanics baselines and anomaly detection must be terrain-stratified — road and trail produce different HR, cadence, and GCT signatures at identical effort; pooling them makes anomaly detection noisy
+- Longitudinal biomechanics z-scores (7/14-day rolling per parameter) only meaningful after stratification
 
-**Hard rules (non-negotiable constraints in recommendation engine):**
+### Tier 3 — Longitudinal analytics
+- Per-athlete biomechanical baseline profiles (cadence-speed regression line, VO range, GCT at given paces)
+- Running economy trend (HR at fixed pace over time — aerobic adaptation signal)
+- Pace-HR decoupling per run, trended across weeks
+
+### Hard rules in recommendation engine (examples of current logic)
 - Upper gym yesterday → no climbing today (elbow/shoulder overlap)
 - Lower gym yesterday → no running, only easy Z2 bike
 - Rain → no threshold runs, no outdoor intensity
 - Short time window → stationary bike Z2
 - Going out tonight → no hard session tomorrow planned
 
-**Sport priority (base building phase):**
-1. Bike (XC specific — outdoor or Z2 stationary)
-2. Run (road before trail, flat before hills)
-3. Climbing (maintenance only)
+### What NOT to build yet
+- Route-normalized power curves — Garmin running power is algorithmically derived and unreliable on trail terrain; creates false precision
+- HRV-strain 48h underperformance prediction — requires outcome labels (injury, DNF, submax) not in the dataset; curve-fitting to noise
+- Stride length prescriptions — causality inverted; stride length is an output of cadence+speed+neuromuscular state, not an input to control

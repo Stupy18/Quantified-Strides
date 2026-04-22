@@ -256,6 +256,38 @@ formula-based zone table with a `low_data` flag; do not surface CIs.
 
 ---
 
+## Future Notebook — Grade-Biomechanics Per-Second Curves
+
+**Prerequisite:** session-level baseline established in `05_biomechanics_baseline.ipynb`.
+
+**Goal:** determine whether grade systematically shifts each biomechanics variable
+in a consistent, athlete-specific way — and if so, build per-athlete grade-correction
+curves so the baseline residuals are grade-neutral.
+
+**Why not done yet:** unlike the Minetti formula for speed (universal, lab-validated),
+grade effects on cadence, GCT, and VO are athlete-specific. Fitting reliable
+per-athlete curves requires enough per-second data at a range of sustained grades.
+Current session counts are sufficient to explore this, but not to build stable curves.
+
+**What the notebook would do:**
+1. Extract per-second records filtered to clean steady-state segments (post-warmup,
+   speed within bounds, post-GPS-gap buffer)
+2. Apply 30s smoothed gradient (same as in notebook 05)
+3. For each athlete × variable: bin records by grade (e.g. −15 to +20% in 2.5% steps)
+   and fit cadence/GCT/VO vs grade at fixed GAP speed bands
+4. Assess whether the grade-biomechanics relationship is consistent across sessions
+   (high R² within athlete) or noisy (personal style dominates)
+5. If consistent: fit a correction curve per athlete per variable, producing
+   "grade-adjusted cadence" analogous to GAP speed. Add to `05` baseline as an
+   optional second-pass improvement.
+6. If noisy: document that GAP speed as sole predictor is sufficient and grade
+   effects on biomechanics are within personal noise — close the question.
+
+**Trigger condition:** build this when any athlete has ≥150 road running sessions
+with full biomechanics coverage (cadence, GCT, VO all non-null).
+
+---
+
 ## Data Available for Development and Testing
 
 All Parquet files are committed to `data/`:
@@ -316,3 +348,458 @@ places. Canonical mapping:
 
 Note: `workout_metrics.workout_id` is the FK — the notebooks use `session_id` as a
 local integer index. Do not confuse the two when joining.
+
+---
+
+# Implementation Protocol — Biomechanical Baseline Model
+
+This section translates `notebooks/05_biomechanics_baseline.ipynb` into a concrete
+implementation spec. The algorithm establishes a personal speed-conditioned
+biomechanics baseline per athlete, compares it against a population reference, and
+flags sessions that deviate beyond the athlete's own normal variability.
+
+---
+
+## What This Model Does
+
+For each athlete:
+1. Cleans per-second running records (artifact removal, GPS dropout masking)
+2. Converts actual speed to Grade Adjusted Pace speed (effort-equivalent flat speed)
+3. Aggregates each session to a single row of mean biomechanics at mean GAP speed
+4. Fits a personal linear regression: `biomechanics_variable ~ GAP_speed`
+5. Computes residuals: deviation of each session from the personal baseline
+6. Flags sessions whose residuals exceed ±1.5 × personal σ as outliers
+
+The population reference table provides the external anchor: where solid recreational
+runners sit at each effort level. Deviations from the population are informational;
+deviations from the personal baseline are the anomaly signal.
+
+---
+
+## Constants
+
+```python
+WARMUP_STRIP_S       = 180     # strip first 3 min — neuromuscular settling time
+SPEED_FLOOR_MS       = 2.0     # m/s — below this is walk/jog transition, not running gait
+SPEED_PCT_CEILING    = 95      # percentile — dynamic ceiling per athlete, excludes sprinting
+GPS_GAP_THRESHOLD_S  = 60      # seconds — gap above this = GPS dropout or auto-pause
+GPS_GAP_BUFFER_S     = 30      # seconds — mask this window either side of each gap
+MIN_DURATION_S       = 600     # 10 min of clean records after strip
+MIN_DISTANCE_M       = 1500    # 1.5 km of clean records after strip
+MIN_COVERAGE_PCT     = 0.50    # minimum non-null fraction to include variable for a session
+CV_SPEED_THRESHOLD   = 0.30    # speed CV above this → interval session flag (excluded from baseline fit)
+OUTLIER_THRESHOLD    = 1.5     # σ — sessions beyond this are flagged as anomalies
+MIN_SESSIONS_BASELINE = 10     # minimum road sessions before baseline is surfaced to user
+```
+
+---
+
+## Step 1 — Terrain Classification
+
+**Source:** `workouts.sport` column (set by athlete on Garmin watch before starting).
+
+```
+sport == 'running'       → road
+sport == 'trail_running' → trail
+```
+
+Do not use `gradient_pct` for terrain classification. In hilly cities, road runs
+naturally carry significant elevation change. Gradient is also a noisy per-second
+derivative (GPS altitude ±5–10m error / 1–2m distance = large spikes on flat ground)
+and is not reliable as a session-level classifier.
+
+Build separate baselines per terrain type. At current session counts, only the road
+baseline has enough data. Trail baseline is deferred.
+
+---
+
+## Step 2 — Per-Second Record Cleaning
+
+Apply in this exact order to `workout_metrics` records for each session:
+
+### 2a. Warmup strip
+```python
+records = records[records.timestamp >= session_start + timedelta(seconds=180)]
+```
+Cardiac lag is ~120s but cadence, GCT, and VO take longer to reach steady-state
+running form. 180s is the validated threshold.
+
+### 2b. Speed bounds
+```python
+speed_ceiling = percentile_95(athlete_road_running_speeds)  # computed once per athlete
+records = records[(records.speed_ms >= 2.0) & (records.speed_ms <= speed_ceiling)]
+```
+Floor: below 2.0 m/s the gait transitions between walk and jog — not running mechanics.  
+Ceiling: 95th percentile of the athlete's actual road running speed — excludes sprinting
+(a biomechanically distinct regime that would skew the baseline).
+
+### 2c. GPS gap masking
+```python
+gaps = records.timestamp.diff().dt.total_seconds()
+for each gap > 60s:
+    mask records within ±30s of the gap boundary
+```
+A gap > 60s means GPS signal loss or auto-pause. Speed and gradient in that window
+are dead-reckoned (accelerometer estimate), not measured. Since the entire model is
+effort-conditioned, records without reliable speed context must be excluded.
+The ±30s buffer removes records where `gradient_pct` is computed from the bad
+distance derivative near the gap boundary.
+
+### 2d. Per-second sanity bounds
+Null out (do not drop) records outside these ranges — the record timestamp and other
+valid fields are kept; only the artifact value is nulled:
+
+| Variable | Floor | Ceiling | Unit |
+|---|---|---|---|
+| `speed_ms` | 0.0 | 7.0 | m/s — above 7 is GPS spike |
+| `cadence` | 100 | 240 | spm |
+| `stance_time` | 100 | 500 | ms |
+| `vertical_oscillation` | 2.0 | 20.0 | cm |
+| `vertical_ratio` | 3.0 | 20.0 | % |
+| `step_length` | 200 | 2000 | mm |
+
+Note: `vertical_oscillation` is stored in cm in `workout_metrics`
+(parsed as raw mm / 10 during Garmin ingestion).
+
+### 2e. Grade Adjusted Pace (GAP) — Minetti et al. (2002)
+
+For each record, compute the flat-equivalent speed using the Minetti metabolic
+cost polynomial. This converts actual speed to the speed that would require
+identical metabolic effort on flat ground.
+
+```python
+def minetti_gap_factor(grade_decimal: float) -> float:
+    """
+    grade_decimal: signed grade in decimal form
+                   (0.10 = 10% uphill, -0.05 = 5% downhill)
+    Validated range: ±0.45 (±45% grade). Clip inputs outside this range.
+    Returns: multiplier to apply to actual speed → flat-equivalent speed
+    """
+    g = clip(grade_decimal, -0.45, 0.45)
+    cost = 155.4*g**5 - 30.4*g**4 - 43.3*g**3 + 46.3*g**2 + 19.5*g + 3.6
+    return cost / 3.6   # 3.6 J/kg/m = flat reference cost C(0)
+```
+
+Reference values:
+
+| Grade | GAP factor | Effect on 3.0 m/s run |
+|---|---|---|
+| −15% | 0.54 | → 1.63 m/s equivalent (easier) |
+| −10% | 0.60 | → 1.80 m/s equivalent |
+| 0% | 1.00 | → 3.00 m/s (no change) |
+| +10% | 1.66 | → 4.97 m/s equivalent (harder) |
+| +15% | 2.15 | → 6.46 m/s equivalent |
+| +20% | 2.82 | → 8.47 m/s equivalent |
+
+**Gradient smoothing before applying GAP:**
+`gradient_pct` from per-second GPS is noisy. Apply a 30-second centered rolling
+mean (min 10 observations) before computing GAP. This removes GPS altitude noise
+(per-second spikes) while preserving real sustained gradients (hills in a city
+like Cluj are tens to hundreds of seconds long).
+
+```python
+grade_smooth = (
+    records['gradient_pct']
+    .rolling(window=30, center=True, min_periods=10)
+    .mean()
+    .fillna(0)
+    / 100  # pct → decimal
+)
+records['gap_speed_ms'] = (records['speed_ms'] * minetti_gap_factor(grade_smooth)).clip(lower=0)
+```
+
+### 2f. Minimum session size
+After all cleaning: require ≥ 600s duration AND ≥ 1500m distance. Sessions that
+don't survive this filter after cleaning are rejected entirely. Shorter sessions
+are not representative of steady-state mechanics.
+
+---
+
+## Step 3 — Session-Level Aggregation
+
+Reduce each cleaned session to one summary row:
+
+```python
+session_row = {
+    'workout_id':        ...,
+    'date':              ...,
+    'athlete_id':        ...,
+    'terrain':           'road' | 'trail',
+    'mean_speed':        mean(records.speed_ms),
+    'mean_gap_speed':    mean(records.gap_speed_ms),   # primary predictor
+    'gap_uplift':        mean_gap_speed - mean_speed,  # diagnostic: elevation effect
+    'elevation_per_km':  total_ascent / (distance_m / 1000),
+    'cv_speed':          std(speed_ms) / mean(speed_ms),
+    'interval_flag':     cv_speed > 0.30,              # exclude from baseline fit
+    'mean_hr':           mean(records.heart_rate),
+    'mean_cadence':      mean(records.cadence)         if coverage >= 50% else null,
+    'mean_vo':           mean(records.vertical_oscillation) if coverage >= 50% else null,
+    'mean_vr':           mean(records.vertical_ratio)  if coverage >= 50% else null,
+    'mean_gct':          mean(records.stance_time)     if coverage >= 50% else null,
+    'cv_cadence':        std / mean of cadence         if coverage >= 50% else null,
+    # ... cv_ for each variable
+}
+```
+
+**Coverage rule:** if more than 50% of clean records for a session have null for a
+given biomechanics variable (e.g. no running dynamics pod), set that variable to null
+for the session. The session itself is not rejected — other variables with coverage
+are still included.
+
+**Interval flag:** sessions with speed CV > 30% have high within-session speed
+variation (interval structure, or heavily hilly segments). Keep them in the dataset
+for range exploration but **exclude from baseline fitting**. They are included in
+population comparison plots.
+
+---
+
+## Step 4 — Population Reference Table
+
+Reference ranges for solid recreational runners, from Dallam et al. (2005),
+Moore (2016), Folland et al. (2017), Garmin Running Dynamics white paper (2017).
+
+The x-axis for this table is GAP speed (flat-equivalent effort), not raw speed.
+
+| GAP speed (m/s) | Cadence (spm) | GCT (ms) | VO (cm) | VR (%) |
+|---|---|---|---|---|
+| 2.0 – 2.5 | 152 – 165 | 270 – 315 | 8.0 – 11.0 | 8.5 – 11.5 |
+| 2.5 – 3.0 | 158 – 170 | 255 – 300 | 7.5 – 10.5 | 8.0 – 11.0 |
+| 3.0 – 3.5 | 162 – 175 | 235 – 280 | 7.5 – 10.0 | 7.5 – 10.5 |
+| 3.5 – 4.0 | 165 – 180 | 220 – 265 | 7.0 – 9.5 | 7.0 – 10.0 |
+| 4.0 – 4.5 | 168 – 183 | 205 – 250 | 6.5 – 9.0 | 6.5 – 9.5 |
+| 4.5 – 5.5 | 172 – 186 | 190 – 235 | 6.0 – 8.5 | 6.0 – 9.0 |
+
+Notes:
+- 180 spm only applies at 4+ m/s GAP effort. At 3 m/s, 165 spm is within the efficient range.
+- GCT decreases with effort — faster running requires shorter ground contact to maintain elastic energy return.
+- VO is relatively effort-independent in the recreational range; it reflects running style more than speed.
+- VR is the primary efficiency signal: lower is better at every effort level.
+
+---
+
+## Step 5 — Personal Baseline Regression
+
+For each athlete × biomechanics variable, fit a linear regression on **steady
+sessions only** (interval_flag == False):
+
+```
+variable = intercept + slope × mean_gap_speed
+```
+
+```python
+from scipy.stats import linregress
+reg = linregress(session_data['mean_gap_speed'], session_data['mean_variable'])
+
+baseline = {
+    'slope':         reg.slope,
+    'intercept':     reg.intercept,
+    'r2':            reg.rvalue ** 2,
+    'n':             len(session_data),
+    'gap_speed_min': session_data['mean_gap_speed'].min(),
+    'gap_speed_max': session_data['mean_gap_speed'].max(),
+}
+```
+
+**Minimum data requirement:** ≥ 5 sessions with non-null values for that variable.
+Below this threshold, return `low_data: true` and do not surface the baseline.
+
+**R² interpretation:**
+- ≥ 0.30: effort explains a meaningful fraction of this variable — regression is useful
+- < 0.30: variable is largely style/noise — regression is weak; use population reference only
+
+**Do not extrapolate:** when predicting from a new session's GAP speed, clamp to
+`[gap_speed_min, gap_speed_max]`. The model is not valid outside the observed range.
+
+---
+
+## Step 6 — Residual Computation
+
+For each session:
+```python
+predicted = baseline['slope'] * session['mean_gap_speed'] + baseline['intercept']
+residual  = session['mean_variable'] - predicted
+```
+
+Residual = 0: session is exactly on personal baseline at that effort level.  
+Residual > 0: session is above baseline (e.g. cadence higher than expected).  
+Residual < 0: session is below baseline.
+
+---
+
+## Step 7 — Personal Variability (σ)
+
+Compute across all sessions (steady + interval, not just steady):
+
+```python
+sigma = std(all_residuals_for_variable)
+```
+
+σ is the athlete's natural session-to-session variability around their baseline
+after accounting for effort level and elevation. This is the outlier detection unit.
+
+**Normality check (Shapiro-Wilk):** if p > 0.05, residuals are normally distributed
+and z-score based detection is valid. If p ≤ 0.05, use IQR-based detection instead:
+
+```python
+# z-score method (normal residuals)
+is_outlier = abs(residual / sigma) > 1.5
+
+# IQR method (non-normal residuals)
+Q1, Q3 = percentile(residuals, 25), percentile(residuals, 75)
+IQR = Q3 - Q1
+is_outlier = (residual < Q1 - 1.5*IQR) or (residual > Q3 + 1.5*IQR)
+```
+
+Require ≥ 8 sessions before running the normality test. Below that, default to IQR.
+
+---
+
+## Step 8 — Efficiency Coupling (VR Correlation)
+
+VR (vertical ratio) is the primary running efficiency proxy. Lower VR at a given
+effort = more energy going forward, less wasted vertically.
+
+For each athlete × variable (excluding VR itself):
+```python
+r, p = pearsonr(variable_residuals, vr_values)
+```
+
+Interpretation:
+- r > 0.3 AND p < 0.10: when this variable is above the athlete's baseline, their
+  VR is worse. **Worth improving** — flag for coaching feedback.
+- Otherwise: **personal style** — no efficiency penalty detected. Do not prescribe changes.
+
+These correlation weights feed the anomaly scoring. Recompute whenever the athlete
+adds ≥ 10 new sessions (correlation estimates stabilise slowly).
+
+---
+
+## Step 9 — Session Anomaly Score
+
+Composite score across all biomechanics variables:
+
+```python
+# Weights: |r| for variables with significant VR correlation (p < 0.10), else 0
+weights = {var: abs(r) if p < 0.10 else 0.0 for var, r, p in correlations}
+total_weight = sum(weights.values())
+
+# Fallback: if no significant correlations yet, equal weights
+if total_weight == 0:
+    weights = {var: 1.0 / n_vars for var in variables}
+
+# Composite z-score
+score = sum(
+    (residual[var] - mean(all_residuals[var])) / std(all_residuals[var])
+    * weights[var] / total_weight
+    for var in variables if residual[var] is not null
+)
+
+is_outlier = abs(score) > 1.5
+direction  = 'degraded_mechanics' if score > 0 else 'unusually_clean'
+```
+
+Positive score: the session showed worse-than-usual mechanics for that effort level
+(higher cadence than expected for GAP speed may not matter, but higher GCT when
+GCT correlates with VR does).  
+Negative score: unusually clean mechanics.
+
+---
+
+## Step 10 — Baseline Stability Gate
+
+Before surfacing any baseline or anomaly scores to the user:
+
+```python
+MIN_SESSIONS = 10  # road sessions with non-null values for the variable
+```
+
+Below 10 sessions, return `{"status": "insufficient_data", "sessions_needed": N}`.
+Do not show a baseline or flag outliers. Show population reference only.
+
+Based on stability analysis (notebook 05, cell 14): R² stabilises around 8–12
+sessions for cadence and GCT. 10 is the conservative minimum across all variables.
+
+---
+
+## App Integration
+
+### New intelligence module
+`intelligence/analytics/biomechanics_baseline.py`
+
+Pure functions, no DB access:
+
+```python
+def clean_session_records(records: pd.DataFrame, session_start: datetime,
+                          speed_ceiling: float) -> pd.DataFrame | None: ...
+
+def compute_gap_speed(records: pd.DataFrame) -> pd.DataFrame: ...
+
+def aggregate_session(records: pd.DataFrame, session_meta: dict) -> dict: ...
+
+def fit_baseline(sessions: pd.DataFrame, variable: str) -> dict | None: ...
+
+def compute_residuals(sessions: pd.DataFrame, baselines: dict) -> pd.DataFrame: ...
+
+def compute_sigma(residuals: pd.Series) -> tuple[float, str]: ...
+    # returns (sigma, method) where method is 'zscore' or 'iqr'
+
+def compute_anomaly_score(residuals: dict, sigmas: dict,
+                          efficiency_weights: dict) -> float: ...
+
+def compare_to_population(mean_gap_speed: float, variable: str) -> dict: ...
+    # returns {'in_range': bool, 'lo': float, 'hi': float, 'position': 'below'|'within'|'above'}
+```
+
+### New service method
+`services/running_service.py` → `get_biomechanics_baseline(user_id, db)`
+
+Reads from:
+- `workouts` WHERE sport IN ('running', 'trail_running') AND user_id = ?
+- `workout_metrics` WHERE workout_id IN (above)
+
+Returns `BiomechanicsBaseline` model with:
+- Per-variable baseline regression parameters
+- Per-variable σ and outlier method
+- Population reference gaps
+- Efficiency coupling weights
+- Last N session anomaly scores
+
+### New API endpoint
+`GET /api/v1/running/biomechanics-baseline`
+
+```json
+{
+  "status": "ok" | "insufficient_data",
+  "sessions_used": 52,
+  "sessions_needed": null,
+  "variables": {
+    "cadence": {
+      "r2": 0.667,
+      "slope": 15.34,
+      "intercept": 114.7,
+      "sigma": 3.1,
+      "outlier_method": "zscore",
+      "population_position": "within",
+      "population_lo": 162,
+      "population_hi": 175
+    }
+  },
+  "recent_sessions": [
+    {
+      "date": "2026-04-15",
+      "mean_gap_speed": 3.42,
+      "gap_uplift": 0.38,
+      "anomaly_score": 0.21,
+      "is_outlier": false,
+      "residuals": {"cadence": 1.2, "stance_time": -4.1, "vertical_oscillation": 0.05}
+    }
+  ]
+}
+```
+
+### Frontend
+`frontend/src/pages/Running.jsx` — extend the existing Running page:
+- Biomechanics vs population scatter plot (GAP speed on x, variable on y, green reference band, personal trend line)
+- Per-variable status card: position relative to population + personal baseline
+- Session history: anomaly score timeline, flagged sessions highlighted
+- Efficiency summary: VR trend, speed/HR trend
