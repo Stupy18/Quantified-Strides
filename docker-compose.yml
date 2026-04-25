@@ -120,10 +120,10 @@ services:
       # URL the device/emulator uses to reach the backend.
       # 10.0.2.2 = Android emulator alias for host machine.
       # Physical device: replace with your LAN IP.
-      EXPO_PUBLIC_API_URL: http://192.168.1.130:8000
+      EXPO_PUBLIC_API_URL: http://${MOBILE_HOST_IP}:8000
       # Metro advertises this IP in the QR code / bundle URL.
       # Must be reachable from the device — 10.0.2.2 for emulator, LAN IP for physical.
-      REACT_NATIVE_PACKAGER_HOSTNAME: 192.168.1.130
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${MOBILE_HOST_IP}
 
 volumes:
   pgdata:

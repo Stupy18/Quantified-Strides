@@ -24,7 +24,7 @@ docker compose logs -f mobile
 exp://<YOUR_LAN_IP>:19000
 ```
 
-The LAN IP is set in `docker-compose.yml` under `REACT_NATIVE_PACKAGER_HOSTNAME`. Update both that and `EXPO_PUBLIC_API_URL` to your machine's current LAN IP before running on a physical device.
+The LAN IP is set in `.env` inside the root folder, not the one inside `/QuantifiedStrides`, under `MOBILE_HOST_IP`. Simply copy the contents of `.env.example` into a new `.env` file in your root, and fill the info in. This roots back to the `docker-compose.yml` under `REACT_NATIVE_PACKAGER_HOSTNAME`. 
 
 ### Local (hot-reload, faster iteration)
 
