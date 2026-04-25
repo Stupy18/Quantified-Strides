@@ -40,19 +40,19 @@ export const ThemeCool: AppTheme = {
   bgPage:       '#0E0F1A',
   bgCard:       '#1A1C2E',
   bgCardDeep:   '#151728',
-  bgAlert:      '#7C131F',
+  bgAlert:      '#5A0E17',    // darker crimson — distinct from the Falu Red accent
 
   textPrimary:  '#F5EFE6',
   textMuted:    '#7A7E99',
   textFaint:    '#383B55',
-  textOnAccent: '#0E0F1A',
+  textOnAccent: '#F5EFE6',    // light on dark red
   textOnAlert:  '#F5EFE6',
 
-  accent:       '#D4D1E5',
+  accent:       '#7C131F',    // Falu Red
 
   borderSubtle: '#272946',
-  divider:      'rgba(212,209,229,0.1)',
-  tabBorder:    'rgba(212,209,229,0.12)',
+  divider:      'rgba(124,19,31,0.15)',
+  tabBorder:    'rgba(124,19,31,0.18)',
 }
 
 export const ActiveTheme: AppTheme = ThemeWarm
