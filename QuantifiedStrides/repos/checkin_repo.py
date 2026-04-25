@@ -67,25 +67,29 @@ class CheckinRepo:
         result = await self.db.execute(
             text("""
                 INSERT INTO workout_reflection (
-                    user_id, entry_date, session_rpe, session_quality, notes, load_feel
+                    user_id, entry_date, session_rpe, session_quality, notes, load_feel, workout_id
                 ) VALUES (
-                    :user_id, :entry_date, :session_rpe, :session_quality, :notes, :load_feel
+                    :user_id, :entry_date, :session_rpe, :session_quality, :notes, :load_feel, :workout_id
                 )
                 ON CONFLICT (user_id, entry_date) DO UPDATE SET
                     session_rpe     = EXCLUDED.session_rpe,
                     session_quality = EXCLUDED.session_quality,
                     notes           = EXCLUDED.notes,
-                    load_feel       = EXCLUDED.load_feel
-                RETURNING reflection_id, user_id, entry_date, session_rpe, session_quality, notes, load_feel
+                    load_feel       = EXCLUDED.load_feel,
+                    workout_id      = COALESCE(EXCLUDED.workout_id, workout_reflection.workout_id)
+                RETURNING
+                    reflection_id, user_id, entry_date, session_rpe, session_quality,
+                    notes, load_feel, workout_id
             """),
-            {"user_id": user_id, **data},
+            {"user_id": user_id, "workout_id": data.get("workout_id"), **data},
         )
         return result.fetchone()
 
     async def get_reflection(self, user_id: int, entry_date: date):
         result = await self.db.execute(
             text("""
-                SELECT reflection_id, user_id, entry_date, session_rpe, session_quality, notes, load_feel
+                SELECT reflection_id, user_id, entry_date, session_rpe, session_quality,
+                       notes, load_feel, workout_id
                 FROM workout_reflection
                 WHERE user_id = :user_id AND entry_date = :entry_date
             """),

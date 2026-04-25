@@ -42,7 +42,7 @@ class WorkoutListItemSchema(BaseModel):
     start_time: datetime | None
     end_time: datetime | None
     duration_s: float | None                  # derived from end_time - start_time
-    distance_m: float | None                  # training_volume column
+    distance_m: float | None
     avg_hr: int | None
     max_hr: int | None
     calories: int | None
@@ -56,13 +56,21 @@ class WorkoutMetricPointSchema(BaseModel):
     cadence: float | None
     vertical_oscillation: float | None        # mm
     vertical_ratio: float | None              # %
-    ground_contact_time: float | None         # ms
+    stance_time: float | None                 # ms
     power: float | None                       # watts
     latitude: float | None
     longitude: float | None
     altitude: float | None                    # metres
     distance: float | None                    # cumulative metres
     gradient_pct: float | None
+    stride_length: float | None               # cm
+    grade_adjusted_pace: float | None         # min/km
+    body_battery: float | None                # 0–100
+    vertical_speed: float | None              # m/s
+    speed_ms: float | None                    # m/s
+    grade_adjusted_speed_ms: float | None     # m/s
+    performance_condition: int | None         # -20 to +20
+    respiration_rate: float | None            # breaths/min
 
 
 class WorkoutDetailSchema(BaseModel):
@@ -73,7 +81,7 @@ class WorkoutDetailSchema(BaseModel):
     start_time: datetime | None
     end_time: datetime | None
     duration_s: float | None
-    distance_m: float | None                  # training_volume
+    distance_m: float | None
     avg_hr: int | None
     max_hr: int | None
     calories: int | None
@@ -94,7 +102,7 @@ class WorkoutDetailSchema(BaseModel):
     max_power: float | None
     avg_cadence: float | None                 # avg_running_cadence
     max_cadence: float | None                 # max_running_cadence
-    avg_gct: float | None                     # avg_ground_contact_time
+    avg_gct: float | None                     # avg_stance_time
     avg_vo: float | None                      # avg_vertical_oscillation
     avg_stride: float | None                  # avg_stride_length
     avg_vr: float | None                      # avg_vertical_ratio

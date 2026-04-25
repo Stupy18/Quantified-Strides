@@ -25,7 +25,7 @@ class UserRepo:
     async def get_by_id(self, user_id: int):
         result = await self.db.execute(
             text("""
-                SELECT u.user_id, u.name, u.email,
+                SELECT u.user_id, u.name, u.email, u.date_of_birth,
                        p.goal, p.gym_days_week, p.primary_sports,
                        p.garmin_email, p.garmin_password
                 FROM users u
@@ -46,14 +46,14 @@ class UserRepo:
         )
         return result.fetchone()
 
-    async def insert_user(self, name: str, email: str, password_hash: str, verification_token: str) -> int:
+    async def insert_user(self, name: str, email: str, password_hash: str, verification_token: str, date_of_birth=None) -> int:
         result = await self.db.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, email_verified, verification_token)
-                VALUES (:name, :email, :hash, FALSE, :token)
+                INSERT INTO users (name, email, password_hash, email_verified, verification_token, date_of_birth)
+                VALUES (:name, :email, :hash, FALSE, :token, :dob)
                 RETURNING user_id
             """),
-            {"name": name, "email": email, "hash": password_hash, "token": verification_token},
+            {"name": name, "email": email, "hash": password_hash, "token": verification_token, "dob": date_of_birth},
         )
         return result.scalar_one()
 

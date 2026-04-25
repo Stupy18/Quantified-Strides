@@ -255,7 +255,7 @@ async def get_running_trends(
             "workout_id":        w.workout_id,
             "workout_date":      w.workout_date,
             "sport":             w.sport,
-            "distance_km":       round((w.training_volume or 0) / 1000, 2),
+            "distance_km":       round((w.distance_m or 0) / 1000, 2),
             "avg_hr":            w.avg_heart_rate,
             "normalized_power":  w.normalized_power,
             "avg_pace":          gap["avg_pace"]        if gap else None,

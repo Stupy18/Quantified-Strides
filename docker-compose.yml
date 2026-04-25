@@ -11,12 +11,38 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./QuantifiedStrides/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U quantified -d quantifiedstrides"]
       interval: 5s
       timeout: 5s
       retries: 15
+
+  flyway:
+    image: flyway/flyway:10
+    container_name: quantifiedstrides_flyway
+    command: migrate
+    volumes:
+      - ./QuantifiedStrides/db/flyway:/flyway/sql
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/quantifiedstrides
+      FLYWAY_USER: quantified
+      FLYWAY_PASSWORD: "2026"
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "1"
+      FLYWAY_CONNECT_RETRIES: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  redis:
+    image: redis:alpine
+    container_name: quantifiedstrides_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
 
   backend:
     build: ./QuantifiedStrides
@@ -26,12 +52,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     env_file:
       - ./QuantifiedStrides/.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"
       API_CORS_ORIGINS: '["http://localhost","http://localhost:5173"]'
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
@@ -45,6 +76,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
       backend:
         condition: service_started
     env_file:
@@ -55,7 +88,7 @@ services:
       DB_NAME: quantifiedstrides
       DB_USER: quantified
       DB_PASSWORD: "2026"
-    entrypoint: ["sh", "scripts/seed_docker.sh"]
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < scripts/seed_docker.sh | /bin/sh"]
 
   frontend:
     build: ./frontend
@@ -69,3 +102,4 @@ services:
 volumes:
   pgdata:
   garmin_tokens:
+  redis-data:
