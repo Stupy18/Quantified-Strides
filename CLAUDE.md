@@ -16,6 +16,7 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 | Database | PostgreSQL (`quantifiedstrides`) via Docker (`pgvector/pgvector:pg16`) |
 | Migrations | Flyway 10 (`flyway/flyway:10` Docker service) — SQL-first versioned migrations in `db/flyway/` |
 | Frontend | React (Vite, port 5173) + shadcn/ui components |
+| Mobile | React Native / Expo SDK 54 + Expo Router 6 (`mobile/mobile/`) |
 | Auth | JWT (HS256, 30-day expiry) + email verification via SMTP |
 | Narrative | Anthropic Claude API (`ai/narrative.py`) |
 | RAG | pgvector extension + `ai/rag.py` |
@@ -450,6 +451,7 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
 - **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
 - **`db/session.py` stale async engine** — defines a second `create_async_engine` instance alongside the canonical one in `deps.py`; ingestion files use the `db/session` one. Should be consolidated so there is a single engine/pool.
+- **Mobile app** (`mobile/mobile/`) — scaffold, theme, component library, and navigation shell are built; all screens are placeholder stubs; bundle compiles but **renders a white screen** in Expo Go (runtime issue, unresolved). See `mobile/CLAUDE.md` → "Known Issue" section for diagnosis notes and debug steps.
 
 ## What Doesn't Exist Yet
 
