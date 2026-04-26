@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { View, TextInput, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
+import { View, TextInput, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform } from 'react-native'
 import { useRouter } from 'expo-router'
+import DateTimePicker from '@react-native-community/datetimepicker'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { SectionTitle }  from '../../src/components/primitives/SectionTitle'
 import { MetricLabel }   from '../../src/components/primitives/MetricLabel'
@@ -24,10 +25,27 @@ interface FormData {
   email: string
   password: string
   confirm: string
-  date_of_birth: string
+  date_of_birth: string   // always "YYYY-MM-DD" or ""
   goal: Goal
   gym_days_week: number
   primary_sports: Record<string, number>
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Format a Date object → "YYYY-MM-DD" (the format the backend expects) */
+function toISODate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Display string shown on the button when a date is selected */
+function toDisplayDate(isoDate: string): string {
+  if (!isoDate) return 'Select date (optional)'
+  const [y, m, d] = isoDate.split('-')
+  return `${d}/${m}/${y}`
 }
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
@@ -57,7 +75,17 @@ function StepCredentials({
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
 
-  const inputStyle = [styles.input, { backgroundColor: theme.bgCard, borderColor: theme.borderSubtle, color: theme.textPrimary }]
+  // Date picker state
+  const [showPicker, setShowPicker] = useState(false)
+  // Seed the picker with the stored ISO date, or today as default
+  const pickerDate = data.date_of_birth
+    ? new Date(data.date_of_birth)
+    : new Date(2000, 0, 1)
+
+  const inputStyle = [
+    styles.input,
+    { backgroundColor: theme.bgCard, borderColor: theme.borderSubtle, color: theme.textPrimary },
+  ]
 
   function validate() {
     if (!data.name || !data.email || !data.password) { setError('Please fill in all required fields'); return }
@@ -65,6 +93,16 @@ function StepCredentials({
     if (data.password !== data.confirm)              { setError('Passwords do not match'); return }
     setError(null)
     onNext()
+  }
+
+  function handleDateChange(_: any, selected?: Date) {
+    // On Android the picker closes automatically; on iOS it stays open
+    if (Platform.OS === 'android') setShowPicker(false)
+    if (selected) onChange('date_of_birth', toISODate(selected))
+  }
+
+  function clearDate() {
+    onChange('date_of_birth', '')
   }
 
   return (
@@ -88,16 +126,60 @@ function StepCredentials({
       <TextInput style={inputStyle} value={data.confirm} onChangeText={v => onChange('confirm', v)}
         placeholder="••••••••" placeholderTextColor={theme.textFaint} secureTextEntry />
 
-      {/* FIX: MetricLabel only accepts a plain string as children.
-          The "(optional)" hint is passed as a separate suffix prop. */}
+      {/* ── Date of birth ────────────────────────────────────────────────── */}
       <MetricLabel
         style={{ marginTop: SPACE.md }}
         suffix={<Text style={{ color: theme.textFaint }}> (optional)</Text>}
       >
         Date of birth
       </MetricLabel>
-      <TextInput style={inputStyle} value={data.date_of_birth} onChangeText={v => onChange('date_of_birth', v)}
-        placeholder="YYYY-MM-DD" placeholderTextColor={theme.textFaint} />
+
+      {/* Trigger button */}
+      <TouchableOpacity
+        onPress={() => setShowPicker(true)}
+        style={[
+          styles.input,
+          styles.dobButton,
+          { backgroundColor: theme.bgCard, borderColor: theme.borderSubtle },
+        ]}
+      >
+        <Text style={[
+          styles.dobButtonText,
+          { color: data.date_of_birth ? theme.textPrimary : theme.textFaint },
+        ]}>
+          {toDisplayDate(data.date_of_birth)}
+        </Text>
+
+        {/* Clear button — only shown when a date is set */}
+        {data.date_of_birth ? (
+          <TouchableOpacity onPress={clearDate} hitSlop={8}>
+            <Text style={{ color: theme.textFaint, fontSize: 16, lineHeight: 18 }}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </TouchableOpacity>
+
+      {/* iOS: inline spinner inside the card; Android: modal dialog */}
+      {showPicker && (
+        <>
+          <DateTimePicker
+            value={pickerDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            maximumDate={new Date()}          // can't pick future dates
+            minimumDate={new Date(1900, 0, 1)}
+            onChange={handleDateChange}
+          />
+          {/* iOS needs an explicit "Done" button to dismiss */}
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity
+              onPress={() => setShowPicker(false)}
+              style={[styles.iosDoneButton, { borderColor: theme.accent }]}
+            >
+              <Text style={[styles.iosDoneText, { color: theme.accent }]}>Done</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
 
       {error && <Text style={[styles.error, { color: theme.bgAlert }]}>{error}</Text>}
 
@@ -303,6 +385,10 @@ const styles = StyleSheet.create({
   dot:             { height: 4, width: 28, borderRadius: 2 },
   card:            { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.sm },
   input:           { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, marginBottom: 4 },
+  dobButton:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dobButtonText:   { fontSize: 14, fontFamily: 'JetBrainsMono' },
+  iosDoneButton:   { alignSelf: 'flex-end', marginTop: 4, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 6 },
+  iosDoneText:     { fontSize: 13, fontFamily: 'JetBrainsMono', fontWeight: '600' },
   chipRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip:            { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8 },
   chipText:        { fontSize: 12, fontFamily: 'JetBrainsMono', letterSpacing: 0.5 },
