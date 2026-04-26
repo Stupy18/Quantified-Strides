@@ -88,7 +88,14 @@ function StepCredentials({
       <TextInput style={inputStyle} value={data.confirm} onChangeText={v => onChange('confirm', v)}
         placeholder="••••••••" placeholderTextColor={theme.textFaint} secureTextEntry />
 
-      <MetricLabel style={{ marginTop: SPACE.md }}>Date of birth <Text style={{ color: theme.textFaint }}>(optional)</Text></MetricLabel>
+      {/* FIX: MetricLabel only accepts a plain string as children.
+          The "(optional)" hint is passed as a separate suffix prop. */}
+      <MetricLabel
+        style={{ marginTop: SPACE.md }}
+        suffix={<Text style={{ color: theme.textFaint }}> (optional)</Text>}
+      >
+        Date of birth
+      </MetricLabel>
       <TextInput style={inputStyle} value={data.date_of_birth} onChangeText={v => onChange('date_of_birth', v)}
         placeholder="YYYY-MM-DD" placeholderTextColor={theme.textFaint} />
 
