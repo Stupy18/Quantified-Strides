@@ -35,9 +35,11 @@ async function request<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiLogin(payload: LoginPayload): Promise<TokenResponse> {
-  return request<TokenResponse>('/auth/login', payload)
+  console.log(payload)
+  return request<TokenResponse>('/api/v1/(auth)/login', payload)
 }
 
 export async function apiRegister(payload: RegisterPayload): Promise<void> {
-  return request<void>('/auth/register', payload)
+  console.log(payload)
+  return request<void>('/api/v1/(auth)/register', payload)
 }
