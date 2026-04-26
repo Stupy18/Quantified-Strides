@@ -35,12 +35,11 @@ async function request<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiLogin(payload: LoginPayload): Promise<TokenResponse> {
-  const jsonString = JSON.stringify(payload);
-  console.log("LOGIN ATTEMPT JSON:", jsonString);
   return request<TokenResponse>('/api/v1/(auth)/login', payload)
 }
 
 export async function apiRegister(payload: RegisterPayload): Promise<void> {
-  console.log(payload)
+  const jsonString = JSON.stringify(payload);
+    console.log("REGISTER ATTEMPT JSON:", jsonString);
   return request<void>('/api/v1/(auth)/register', payload)
 }
