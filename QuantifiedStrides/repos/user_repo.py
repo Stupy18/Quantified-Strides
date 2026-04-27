@@ -25,7 +25,7 @@ class UserRepo:
     async def get_by_id(self, user_id: int):
         result = await self.db.execute(
             text("""
-                SELECT u.user_id, u.name, u.email, u.date_of_birth,
+                SELECT u.user_id, u.name, u.email, u.date_of_birth, u.gender, u.profile_pic_url,
                        p.goal, p.gym_days_week, p.primary_sports,
                        p.garmin_email, p.garmin_password
                 FROM users u
@@ -46,14 +46,14 @@ class UserRepo:
         )
         return result.fetchone()
 
-    async def insert_user(self, name: str, email: str, password_hash: str, verification_token: str, date_of_birth=None) -> int:
+    async def insert_user(self, name: str, email: str, password_hash: str, verification_token: str, date_of_birth=None, gender: str | None = None, profile_pic_url: str | None = None) -> int:
         result = await self.db.execute(
             text("""
-                INSERT INTO users (name, email, password_hash, email_verified, verification_token, date_of_birth)
-                VALUES (:name, :email, :hash, FALSE, :token, :dob)
+                INSERT INTO users (name, email, password_hash, email_verified, verification_token, date_of_birth, gender, profile_pic_url)
+                VALUES (:name, :email, :hash, FALSE, :token, :dob, :gender, :pic)
                 RETURNING user_id
             """),
-            {"name": name, "email": email, "hash": password_hash, "token": verification_token, "dob": date_of_birth},
+            {"name": name, "email": email, "hash": password_hash, "token": verification_token, "dob": date_of_birth, "gender": gender, "pic": profile_pic_url},
         )
         return result.scalar_one()
 
@@ -76,6 +76,18 @@ class UserRepo:
         await self.db.execute(
             text("UPDATE users SET name = :name WHERE user_id = :uid"),
             {"name": name, "uid": user_id},
+        )
+
+    async def update_gender(self, user_id: int, gender: str) -> None:
+        await self.db.execute(
+            text("UPDATE users SET gender = :gender WHERE user_id = :uid"),
+            {"gender": gender, "uid": user_id},
+        )
+
+    async def update_profile_pic(self, user_id: int, profile_pic_url: str) -> None:
+        await self.db.execute(
+            text("UPDATE users SET profile_pic_url = :url WHERE user_id = :uid"),
+            {"url": profile_pic_url, "uid": user_id},
         )
 
     async def update_profile(self, user_id: int, fields: dict) -> None:

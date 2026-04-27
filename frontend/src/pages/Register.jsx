@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { register } from '@/api/auth'
@@ -10,11 +10,28 @@ const GOALS = [
   { key: 'hypertrophy', label: 'Hypertrophy' },
 ]
 
+const GENDERS = [
+  { key: 'male',              label: 'Male' },
+  { key: 'female',            label: 'Female' },
+  { key: 'non_binary',        label: 'Non-binary' },
+  { key: 'prefer_not_to_say', label: 'Prefer not to say' },
+]
+
 function StepCredentials({ data, onChange, onNext }) {
   const [error, setError] = useState(null)
+  const fileRef = useRef(null)
+
+  function handlePickImage(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => onChange('profile_pic_url', reader.result)
+    reader.readAsDataURL(file)
+  }
 
   function submit(e) {
     e.preventDefault()
+    if (!data.gender) { setError('Please select a gender'); return }
     if (data.password.length < 6) { setError('Password must be at least 6 characters'); return }
     if (data.password !== data.confirm) { setError('Passwords do not match'); return }
     setError(null)
@@ -23,6 +40,22 @@ function StepCredentials({ data, onChange, onNext }) {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+
+      {/* Avatar picker */}
+      <div className="flex justify-center pb-1">
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="relative w-20 h-20 rounded-full bg-muted border-2 border-border hover:border-primary transition-colors overflow-hidden flex items-center justify-center group cursor-pointer">
+          {data.profile_pic_url
+            ? <img src={data.profile_pic_url} alt="Profile" className="w-full h-full object-cover" />
+            : <span className="text-2xl text-muted-foreground select-none">+</span>
+          }
+          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <span className="text-white text-xs font-medium">Photo</span>
+          </div>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePickImage} />
+      </div>
+
       <div className="space-y-1">
         <label className="text-sm font-medium">Name</label>
         <input type="text" required value={data.name}
@@ -52,6 +85,14 @@ function StepCredentials({ data, onChange, onNext }) {
         <input type="date" value={data.date_of_birth}
           onChange={e => onChange('date_of_birth', e.target.value)}
           className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+      </div>
+      <div className="space-y-1">
+        <label className="text-sm font-medium">Gender</label>
+        <select required value={data.gender} onChange={e => onChange('gender', e.target.value)}
+          className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
+          <option value="" disabled>Select gender</option>
+          {GENDERS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+        </select>
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -123,7 +164,8 @@ export default function Register() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState(null)
   const [data, setData]       = useState({
-    name: '', email: '', password: '', confirm: '', date_of_birth: '',
+    name: '', email: '', password: '', confirm: '', date_of_birth: '', gender: '',
+    profile_pic_url: '',
     goal: 'athlete', gym_days_week: 3, primary_sports: {},
   })
 
@@ -135,13 +177,15 @@ export default function Register() {
     setLoading(true)
     try {
       await register({
-        name:           data.name,
-        email:          data.email,
-        password:       data.password,
-        goal:           data.goal,
-        gym_days_week:  data.gym_days_week,
-        primary_sports: data.primary_sports,
-        ...(data.date_of_birth && { date_of_birth: data.date_of_birth }),
+        name:            data.name,
+        email:           data.email,
+        password:        data.password,
+        gender:          data.gender,
+        goal:            data.goal,
+        gym_days_week:   data.gym_days_week,
+        primary_sports:  data.primary_sports,
+        ...(data.date_of_birth   && { date_of_birth:   data.date_of_birth }),
+        ...(data.profile_pic_url && { profile_pic_url: data.profile_pic_url }),
       })
       setStep(3)
     } catch (err) {

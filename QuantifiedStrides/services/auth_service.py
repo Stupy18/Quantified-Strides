@@ -47,12 +47,14 @@ async def register(
     gym_days_week: int,
     primary_sports: dict,
     date_of_birth=None,
+    gender: str | None = None,
+    profile_pic_url: str | None = None,
 ) -> dict:
     if await repo.email_exists(email):
         raise ValueError("Email already registered")
 
     verification_token = secrets.token_urlsafe(32)
-    user_id = await repo.insert_user(name, email, hash_password(password), verification_token, date_of_birth)
+    user_id = await repo.insert_user(name, email, hash_password(password), verification_token, date_of_birth, gender, profile_pic_url)
     await repo.insert_profile(user_id, goal, gym_days_week, primary_sports)
     await repo.db.commit()
 
@@ -101,6 +103,8 @@ async def get_me(repo: UserRepo, user_id: int) -> dict:
         "name":            row.name,
         "email":           row.email,
         "date_of_birth":   row.date_of_birth,
+        "gender":          row.gender,
+        "profile_pic_url": row.profile_pic_url,
         "goal":            row.goal,
         "gym_days_week":   row.gym_days_week,
         "primary_sports":  row.primary_sports or {},
@@ -123,9 +127,17 @@ async def update_me(
     primary_sports: dict | None,
     garmin_email: str | None,
     garmin_password: str | None,
+    gender: str | None = None,
+    profile_pic_url: str | None = None,
 ) -> dict:
     if name is not None:
         await repo.update_name(user_id, name)
+
+    if gender is not None:
+        await repo.update_gender(user_id, gender)
+
+    if profile_pic_url is not None:
+        await repo.update_profile_pic(user_id, profile_pic_url)
 
     scalar_fields = {k: v for k, v in [
         ("goal", goal),
