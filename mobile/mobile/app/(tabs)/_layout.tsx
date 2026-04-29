@@ -6,6 +6,7 @@ import { ActiveTheme } from '../../src/theme'
 import { useCheckInStore } from '../../src/store/checkInStore'
 import { CheckInModal } from '../../src/components/checkin/CheckInModal'
 import { CheckInFAB }   from '../../src/components/checkin/CheckInFAB'
+import {useTheme} from "../../src/hooks/useTheme";
 
 // ── Tab bar icons ─────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ function MeIcon({ color, size }: IconProps) {
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 export default function TabsLayout() {
-  const t = ActiveTheme
+  const t = useTheme()
   const { submittedToday, openModal } = useCheckInStore()
 
   // Auto-open once on mount if today's check-in is still pending.
