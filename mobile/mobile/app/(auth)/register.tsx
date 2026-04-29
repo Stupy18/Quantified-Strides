@@ -13,7 +13,7 @@ import { SPACE, RADIUS, TEXT } from '../../src/theme'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Goal = 'athlete' | 'strength' | 'hypertrophy'
-type Gender = 'male' | 'female' | 'non_binary' | 'prefer_not_to_say'
+type Gender = 'male' | 'female'
 
 const GOALS: { key: Goal; label: string }[] = [
   { key: 'athlete',     label: 'Multi-sport athlete' },
@@ -24,8 +24,6 @@ const GOALS: { key: Goal; label: string }[] = [
 const GENDERS: { key: Gender; label: string }[] = [
   { key: 'male',              label: 'Male' },
   { key: 'female',            label: 'Female' },
-  { key: 'non_binary',        label: 'Non-binary' },
-  { key: 'prefer_not_to_say', label: 'Prefer not to say' },
 ]
 
 interface FormData {

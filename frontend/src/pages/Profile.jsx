@@ -16,8 +16,6 @@ const GOALS = [
 const GENDERS = [
   { key: 'male',              label: 'Male' },
   { key: 'female',            label: 'Female' },
-  { key: 'non_binary',        label: 'Non-binary' },
-  { key: 'prefer_not_to_say', label: 'Prefer not to say' },
 ]
 
 export default function Profile() {
@@ -122,7 +120,6 @@ export default function Profile() {
           <label className="text-sm font-medium">Gender</label>
           <select value={form.gender} onChange={e => set('gender', e.target.value)}
             className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
-            <option value="">Prefer not to say</option>
             {GENDERS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
           </select>
         </div>

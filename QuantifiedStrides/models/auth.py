@@ -3,7 +3,7 @@ from datetime import date
 from pydantic import BaseModel, EmailStr, Field
 
 
-GENDER_OPTIONS = {"male", "female", "non_binary", "prefer_not_to_say"}
+GENDER_OPTIONS = {"male", "female"}
 
 
 class RegisterSchema(BaseModel):

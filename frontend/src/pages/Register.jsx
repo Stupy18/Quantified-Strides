@@ -13,8 +13,6 @@ const GOALS = [
 const GENDERS = [
   { key: 'male',              label: 'Male' },
   { key: 'female',            label: 'Female' },
-  { key: 'non_binary',        label: 'Non-binary' },
-  { key: 'prefer_not_to_say', label: 'Prefer not to say' },
 ]
 
 function StepCredentials({ data, onChange, onNext }) {
