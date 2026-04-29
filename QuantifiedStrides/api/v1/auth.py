@@ -23,6 +23,8 @@ async def register(body: RegisterSchema, repo: UserRepo = Depends(get_user_repo)
             gym_days_week=body.gym_days_week,
             primary_sports=body.primary_sports,
             date_of_birth=body.date_of_birth,
+            gender=body.gender,
+            profile_pic_url=body.profile_pic_url,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,4 +81,6 @@ async def update_me(
         primary_sports=body.primary_sports,
         garmin_email=body.garmin_email,
         garmin_password=body.garmin_password,
+        gender=body.gender,
+        profile_pic_url=body.profile_pic_url,
     )

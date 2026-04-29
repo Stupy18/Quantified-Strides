@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
@@ -13,6 +13,11 @@ const GOALS = [
   { key: 'hypertrophy', label: 'Hypertrophy' },
 ]
 
+const GENDERS = [
+  { key: 'male',              label: 'Male' },
+  { key: 'female',            label: 'Female' },
+]
+
 export default function Profile() {
   const qc       = useQueryClient()
   const navigate = useNavigate()
@@ -21,12 +26,15 @@ export default function Profile() {
   const [form, setForm]               = useState(null)
   const [showGarminPw, setShowGarminPw] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const fileRef = useRef(null)
 
   // Only initialise once — never reset on background refetch
   useEffect(() => {
     if (!data || form !== null) return
     setForm({
       name:            data.name ?? '',
+      gender:          data.gender ?? '',
+      profile_pic_url: data.profile_pic_url ?? '',
       goal:            data.goal ?? 'athlete',
       gym_days_week:   data.gym_days_week ?? 3,
       primary_sports:  data.primary_sports ?? {},
@@ -34,6 +42,14 @@ export default function Profile() {
       garmin_password: data.garmin_password ?? '',
     })
   }, [data])
+
+  function handlePickImage(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => set('profile_pic_url', reader.result)
+    reader.readAsDataURL(file)
+  }
 
   const mut = useMutation({
     mutationFn: updateMe,
@@ -61,7 +77,9 @@ export default function Profile() {
 
   function save(e) {
     e.preventDefault()
-    mut.mutate(form)
+    const payload = { ...form }
+    if (!payload.profile_pic_url) delete payload.profile_pic_url
+    mut.mutate(payload)
   }
 
   return (
@@ -72,11 +90,38 @@ export default function Profile() {
       </div>
 
       <form onSubmit={save} noValidate className="space-y-6">
+
+        {/* Avatar */}
+        <div className="flex flex-col items-center gap-2">
+          <button type="button" onClick={() => fileRef.current?.click()}
+            className="relative w-24 h-24 rounded-full bg-muted border-2 border-border hover:border-primary transition-colors overflow-hidden flex items-center justify-center group cursor-pointer">
+            {form.profile_pic_url
+              ? <img src={form.profile_pic_url} alt="Profile" className="w-full h-full object-cover" />
+              : <span className="text-3xl text-muted-foreground select-none">
+                  {form.name ? form.name[0].toUpperCase() : '?'}
+                </span>
+            }
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <span className="text-white text-xs font-medium">Change photo</span>
+            </div>
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePickImage} />
+        </div>
+
         {/* Name */}
         <div className="space-y-1">
           <label className="text-sm font-medium">Name</label>
           <input value={form.name} onChange={e => set('name', e.target.value)}
             className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+
+        {/* Gender */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium">Gender</label>
+          <select value={form.gender} onChange={e => set('gender', e.target.value)}
+            className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
+            {GENDERS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+          </select>
         </div>
 
         {/* Goal */}

@@ -13,11 +13,17 @@ import { SPACE, RADIUS, TEXT } from '../../src/theme'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Goal = 'athlete' | 'strength' | 'hypertrophy'
+type Gender = 'male' | 'female'
 
 const GOALS: { key: Goal; label: string }[] = [
   { key: 'athlete',     label: 'Multi-sport athlete' },
   { key: 'strength',    label: 'Strength' },
   { key: 'hypertrophy', label: 'Hypertrophy' },
+]
+
+const GENDERS: { key: Gender; label: string }[] = [
+  { key: 'male',              label: 'Male' },
+  { key: 'female',            label: 'Female' },
 ]
 
 interface FormData {
@@ -26,6 +32,7 @@ interface FormData {
   password: string
   confirm: string
   date_of_birth: string   // always "YYYY-MM-DD" or ""
+  gender: Gender | ''
   goal: Goal
   gym_days_week: number
   primary_sports: Record<string, number>
@@ -77,7 +84,6 @@ function StepCredentials({
 
   // Date picker state
   const [showPicker, setShowPicker] = useState(false)
-  // Seed the picker with the stored ISO date, or today as default
   const pickerDate = data.date_of_birth
     ? new Date(data.date_of_birth)
     : new Date(2000, 0, 1)
@@ -180,6 +186,28 @@ function StepCredentials({
           )}
         </>
       )}
+
+      {/* ── Gender ───────────────────────────────────────────────────── */}
+      <MetricLabel style={{ marginTop: SPACE.md }}>Gender</MetricLabel>
+      <View style={styles.chipRow}>
+        {GENDERS.map(g => (
+          <TouchableOpacity
+            key={g.key}
+            onPress={() => onChange('gender', g.key)}
+            style={[
+              styles.chip,
+              {
+                borderColor:     data.gender === g.key ? theme.accent : theme.borderSubtle,
+                backgroundColor: data.gender === g.key ? theme.bgCardDeep : 'transparent',
+              },
+            ]}
+          >
+            <Text style={[styles.chipText, { color: data.gender === g.key ? theme.accent : theme.textMuted }]}>
+              {g.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {error && <Text style={[styles.error, { color: theme.bgAlert }]}>{error}</Text>}
 
@@ -312,6 +340,7 @@ export default function RegisterScreen() {
   const [error,   setError]   = useState<string | null>(null)
   const [data,    setData]    = useState<FormData>({
     name: '', email: '', password: '', confirm: '', date_of_birth: '',
+    gender: '',
     goal: 'athlete', gym_days_week: 3, primary_sports: {},
   })
 
@@ -324,13 +353,14 @@ export default function RegisterScreen() {
     setLoading(true)
     try {
       await register({
-        name:           data.name,
-        email:          data.email.trim().toLowerCase(),
-        password:       data.password,
-        goal:           data.goal,
-        gym_days_week:  data.gym_days_week,
-        primary_sports: data.primary_sports,
+        name:            data.name,
+        email:           data.email.trim().toLowerCase(),
+        password:        data.password,
+        goal:            data.goal,
+        gym_days_week:   data.gym_days_week,
+        primary_sports:  data.primary_sports,
         ...(data.date_of_birth ? { date_of_birth: data.date_of_birth } : {}),
+        ...(data.gender        ? { gender:        data.gender }        : {}),
       })
       setStep(3)
     } catch (err: any) {
@@ -378,23 +408,23 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:       { paddingVertical: SPACE.xl },
-  header:          { alignItems: 'center', marginBottom: SPACE.xl },
-  appName:         { fontSize: 13, letterSpacing: 3, fontFamily: 'JetBrainsMono', fontWeight: '700' },
-  dots:            { flexDirection: 'row', gap: 6, marginTop: 12 },
-  dot:             { height: 4, width: 28, borderRadius: 2 },
-  card:            { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.sm },
-  input:           { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, marginBottom: 4 },
-  dobButton:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dobButtonText:   { fontSize: 14, fontFamily: 'JetBrainsMono' },
-  iosDoneButton:   { alignSelf: 'flex-end', marginTop: 4, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 6 },
-  iosDoneText:     { fontSize: 13, fontFamily: 'JetBrainsMono', fontWeight: '600' },
-  chipRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  chip:            { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8 },
-  chipText:        { fontSize: 12, fontFamily: 'JetBrainsMono', letterSpacing: 0.5 },
-  error:           { fontSize: 12, marginTop: SPACE.sm, fontFamily: 'JetBrainsMono' },
-  hint:            { fontSize: 11, fontFamily: 'JetBrainsMono', marginTop: SPACE.md, lineHeight: 18 },
-  verifyContainer: { alignItems: 'center', paddingVertical: SPACE.lg },
-  verifyIcon:      { fontSize: 48, marginBottom: SPACE.md },
-  verifyText:      { fontSize: 13, textAlign: 'center', lineHeight: 20, fontFamily: 'JetBrainsMono' },
+  container:         { paddingVertical: SPACE.xl },
+  header:            { alignItems: 'center', marginBottom: SPACE.xl },
+  appName:           { fontSize: 13, letterSpacing: 3, fontFamily: 'JetBrainsMono', fontWeight: '700' },
+  dots:              { flexDirection: 'row', gap: 6, marginTop: 12 },
+  dot:               { height: 4, width: 28, borderRadius: 2 },
+  card:              { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.sm },
+  input:             { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, marginBottom: 4 },
+  dobButton:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dobButtonText:     { fontSize: 14, fontFamily: 'JetBrainsMono' },
+  iosDoneButton:     { alignSelf: 'flex-end', marginTop: 4, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 6 },
+  iosDoneText:       { fontSize: 13, fontFamily: 'JetBrainsMono', fontWeight: '600' },
+  chipRow:           { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  chip:              { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8 },
+  chipText:          { fontSize: 12, fontFamily: 'JetBrainsMono', letterSpacing: 0.5 },
+  error:             { fontSize: 12, marginTop: SPACE.sm, fontFamily: 'JetBrainsMono' },
+  hint:              { fontSize: 11, fontFamily: 'JetBrainsMono', marginTop: SPACE.md, lineHeight: 18 },
+  verifyContainer:   { alignItems: 'center', paddingVertical: SPACE.lg },
+  verifyIcon:        { fontSize: 48, marginBottom: SPACE.md },
+  verifyText:        { fontSize: 13, textAlign: 'center', lineHeight: 20, fontFamily: 'JetBrainsMono' },
 })
