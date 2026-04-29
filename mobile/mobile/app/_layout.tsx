@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider } from '../src/context/ThemeContext';
+import { useCheckInStore } from '../src/store/checkInStore';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -30,6 +31,20 @@ function AuthGate() {
   return null;
 }
 
+// Sits inside AuthProvider so it has access to the token
+function CheckInHydrator() {
+  const { token, loading } = useAuth();
+  const hydrate = useCheckInStore(s => s.hydrate);
+
+  useEffect(() => {
+    // Wait until auth is resolved and we have a token before hitting the backend
+    if (loading || !token) return;
+    hydrate(token);
+  }, [loading, token]);
+
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Newsreader:        require('../assets/fonts/Newsreader-Regular.ttf'),
@@ -48,6 +63,7 @@ export default function RootLayout() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <CheckInHydrator />
           <AuthGate />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />

@@ -5,12 +5,15 @@ import {
 } from 'react-native'
 import * as ImagePicker from 'expo-image-picker'
 import * as FileSystem from 'expo-file-system'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { MetricLabel }   from '../../src/components/primitives/MetricLabel'
 import { ActionButton }  from '../../src/components/primitives/ActionButton'
+import { GhostButton }   from '../../src/components/primitives/GhostButton'
 import { useTheme }      from '../../src/hooks/useTheme'
 import { useThemeContext } from '../../src/context/ThemeContext'
 import { useAuth }       from '../../src/context/AuthContext'
+import { useCheckInStore } from '../../src/store/checkInStore'
 import { apiGetMe, apiUpdateProfile, UserProfile, UpdateProfilePayload } from '../../src/api/auth'
 import { SPACE, RADIUS, TEXT } from '../../src/theme'
 
@@ -89,7 +92,7 @@ function ThemeToggle() {
 
 export default function MeScreen() {
   const theme         = useTheme()
-  const { token }     = useAuth()
+  const { token, logout } = useAuth()
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState(false)
   const [profile,  setProfile]  = useState<UserProfile | null>(null)
@@ -152,6 +155,25 @@ export default function MeScreen() {
     } finally {
       setSaving(false)
     }
+  }
+
+
+  async function handleLogout() {
+    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          // Reset check-in store so next user/session starts fresh
+          await AsyncStorage.removeItem('qs_checkin_date')  // ← add this line
+          useCheckInStore.getState().closeModal()
+          useCheckInStore.setState({ submittedToday: false, hydrated: false })
+          await logout()
+          // AuthGate in _layout will redirect to /(auth)/login automatically
+        },
+      },
+    ])
   }
 
   const inputStyle = [
@@ -318,6 +340,16 @@ export default function MeScreen() {
           style={{ marginTop: SPACE.xl }}
         />
 
+        {/* ── Logout ── */}
+        <GhostButton
+          label="Sign out"
+          onPress={handleLogout}
+          variant="danger"
+          size="lg"
+          fullWidth
+          style={{ marginTop: SPACE.md, marginBottom: SPACE.xl }}
+        />
+
       </View>
     </ScreenWrapper>
   )
@@ -359,4 +391,5 @@ const styles = StyleSheet.create({
   toggleIcon:       { fontSize: 18, width: 22, textAlign: 'center' },
   track:            { width: 72, height: 32, borderRadius: 16, borderWidth: 1, justifyContent: 'center' },
   nub:              { width: 24, height: 24, borderRadius: 12, position: 'absolute' },
+
 })
