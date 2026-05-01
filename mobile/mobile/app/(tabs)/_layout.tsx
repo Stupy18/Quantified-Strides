@@ -1,13 +1,11 @@
-import React, { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Tabs } from 'expo-router'
 import Svg, { Path, Circle } from 'react-native-svg'
-import { ActiveTheme } from '../../src/theme'
 import { useCheckInStore } from '../../src/store/checkInStore'
 import { CheckInModal } from '../../src/components/checkin/CheckInModal'
 import { CheckInFAB }   from '../../src/components/checkin/CheckInFAB'
-
-// ── Tab bar icons ─────────────────────────────────────────────────────────────
+import { useTheme }     from '../../src/hooks/useTheme'
 
 type IconProps = { color: string; size: number }
 
@@ -20,14 +18,10 @@ function TodayIcon({ color, size }: IconProps) {
   )
 }
 
-// Rising Bézier curve + endpoint dot — mirrors the CTL line on the Load screen.
 function LoadIcon({ color, size }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3,20 C6,18 9,15 13,11 S18,6 21,4"
-        stroke={color} strokeWidth={1.5} strokeLinecap="round"
-      />
+      <Path d="M3,20 C6,18 9,15 13,11 S18,6 21,4" stroke={color} strokeWidth={1.5} strokeLinecap="round" />
       <Circle cx={21} cy={4} r={2} fill={color} />
     </Svg>
   )
@@ -45,10 +39,7 @@ function HistoryIcon({ color, size }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={8.5} stroke={color} strokeWidth={1.5} />
-      <Path
-        d="M12 8v4l2.5 2"
-        stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
-      />
+      <Path d="M12 8v4l2.5 2" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   )
 }
@@ -57,28 +48,24 @@ function MeIcon({ color, size }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={8} r={3.5} stroke={color} strokeWidth={1.5} />
-      <Path
-        d="M4.5 20c0-3.9 3.4-6.5 7.5-6.5s7.5 2.6 7.5 6.5"
-        stroke={color} strokeWidth={1.5} strokeLinecap="round"
-      />
+      <Path d="M4.5 20c0-3.9 3.4-6.5 7.5-6.5s7.5 2.6 7.5 6.5" stroke={color} strokeWidth={1.5} strokeLinecap="round" />
     </Svg>
   )
 }
 
-// ── Layout ────────────────────────────────────────────────────────────────────
-
 export default function TabsLayout() {
-  const t = ActiveTheme
-  const { submittedToday, openModal } = useCheckInStore()
+  const t = useTheme()
+  const { submittedToday, hydrated, openModal } = useCheckInStore()
 
-  // Auto-open once on mount if today's check-in is still pending.
-  // Delayed 600 ms so the tab bar finishes its entrance animation first.
+  // Only open the modal once hydration is complete — prevents race condition
+  // where the timer fires before AsyncStorage is read on cold start
   useEffect(() => {
+    if (!hydrated) return
     if (!submittedToday) {
       const timer = setTimeout(openModal, 600)
       return () => clearTimeout(timer)
     }
-  }, [])
+  }, [hydrated, submittedToday])
 
   return (
     <View style={styles.root}>
@@ -107,10 +94,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="me"      options={{ title: 'Me',      tabBarIcon: ({ color, size }) => <MeIcon      color={color} size={size} /> }} />
       </Tabs>
 
-      {/* FAB floats above the tab bar on every screen until check-in is submitted */}
       <CheckInFAB />
-
-      {/* Modal renders as a native overlay above everything */}
       <CheckInModal />
     </View>
   )

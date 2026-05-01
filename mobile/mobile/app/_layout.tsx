@@ -1,17 +1,15 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useFonts } from 'expo-font';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '../src/api/queryClient';
 import * as SplashScreen from 'expo-splash-screen';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
+import { ThemeProvider } from '../src/context/ThemeContext';
+import { useCheckInStore } from '../src/store/checkInStore';
 
-// Keep splash screen visible while fonts/auth are loading
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 1000 * 60 * 5, retry: 1 } },
-});
 
 function AuthGate() {
   const { token, loading } = useAuth();
@@ -19,17 +17,11 @@ function AuthGate() {
   const router = useRouter();
 
   useEffect(() => {
-    // Wait until Auth is checked and Fonts are loaded (handled by RootLayout)
     if (loading) return;
-
-    // Fix: removed the double parentheses '((auth))'
     const inAuthGroup = segments[0] === '(auth)';
-
     if (!token && !inAuthGroup) {
-      // Not logged in — send to login
       router.replace('/(auth)/login');
     } else if (token && inAuthGroup) {
-      // Already logged in — send into app
       router.replace('/(tabs)/today');
     }
   }, [token, loading, segments]);
@@ -37,8 +29,22 @@ function AuthGate() {
   return null;
 }
 
+// Sits inside AuthProvider so it has access to the token
+function CheckInHydrator() {
+  const { token, loading } = useAuth();
+  const hydrate = useCheckInStore(s => s.hydrate);
+
+  useEffect(() => {
+    // Wait until auth is resolved and we have a token before hitting the backend
+    if (loading || !token) return;
+    hydrate(token);
+  }, [loading, token]);
+
+  return null;
+}
+
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
+  const [fontsLoaded] = useFonts({
     Newsreader:        require('../assets/fonts/Newsreader-Regular.ttf'),
     Newsreader_Italic: require('../assets/fonts/Newsreader-Italic.ttf'),
     JetBrainsMono:     require('../assets/fonts/JetBrainsMono-Regular.ttf'),
@@ -46,17 +52,16 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
+    if (fontsLoaded) SplashScreen.hideAsync();
+  }, [fontsLoaded]);
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!fontsLoaded) return null;
 
   return (
-    <SafeAreaProvider>
+    <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <CheckInHydrator />
           <AuthGate />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />
@@ -64,6 +69,6 @@ export default function RootLayout() {
           </Stack>
         </AuthProvider>
       </QueryClientProvider>
-    </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

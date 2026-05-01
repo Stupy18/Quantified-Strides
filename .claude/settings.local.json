@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx expo *)",
       "Bash(npx tsc *)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(npm install *)"
     ]
   }
 }

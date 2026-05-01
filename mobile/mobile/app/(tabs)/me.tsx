@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, ActivityIndicator,
-  StyleSheet, Alert, Image,
+  StyleSheet, Alert, Image, Animated,
 } from 'react-native'
 import * as ImagePicker from 'expo-image-picker'
 import * as FileSystem from 'expo-file-system'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { MetricLabel }   from '../../src/components/primitives/MetricLabel'
 import { ActionButton }  from '../../src/components/primitives/ActionButton'
+import { GhostButton }   from '../../src/components/primitives/GhostButton'
 import { useTheme }      from '../../src/hooks/useTheme'
+import { useThemeContext } from '../../src/context/ThemeContext'
 import { useAuth }       from '../../src/context/AuthContext'
+import { useCheckInStore } from '../../src/store/checkInStore'
 import { apiGetMe, apiUpdateProfile, UserProfile, UpdateProfilePayload } from '../../src/api/auth'
 import { SPACE, RADIUS, TEXT } from '../../src/theme'
 
@@ -27,9 +31,68 @@ const GOALS: { key: Goal; label: string }[] = [
   { key: 'hypertrophy', label: 'Hypertrophy' },
 ]
 
+// ─── Theme toggle ─────────────────────────────────────────────────────────────
+
+function ThemeToggle() {
+  const theme                    = useTheme()
+  const { themeName, toggleTheme } = useThemeContext()
+  const isCool                   = themeName === 'cool'
+
+  // Slide the nub: 0 = cool (left), 1 = warm (right)
+  const [anim] = useState(new Animated.Value(isCool ? 1 : 0))
+
+  useEffect(() => {
+    Animated.spring(anim, {
+      toValue:         isCool ? 1 : 0,
+      useNativeDriver: true,
+      tension:         80,
+      friction:        10,
+    }).start()
+  }, [isCool])
+
+  const TRACK_W  = 72
+  const TRACK_H  = 32
+  const NUB_SIZE = 24
+  const TRAVEL   = TRACK_W - NUB_SIZE - 8  // 8 = 4px padding each side
+
+  const nubX = anim.interpolate({
+    inputRange:  [0, 1],
+    outputRange: [4, 4 + TRAVEL],
+  })
+
+  return (
+    <View style={styles.toggleRow}>
+      {/* Sun */}
+      <Text style={[styles.toggleIcon, { color: !isCool ? theme.accent : theme.textFaint }]}>☀︎</Text>
+
+      <TouchableOpacity onPress={toggleTheme} activeOpacity={0.85}>
+        <View style={[
+          styles.track,
+          { backgroundColor: theme.bgCardDeep, borderColor: theme.borderSubtle },
+        ]}>
+          <Animated.View
+            style={[
+              styles.nub,
+              {
+                backgroundColor: theme.accent,
+                transform: [{ translateX: nubX }],
+              },
+            ]}
+          />
+        </View>
+      </TouchableOpacity>
+
+      {/* Snowflake */}
+      <Text style={[styles.toggleIcon, { color: isCool ? theme.accent : theme.textFaint }]}>❄︎</Text>
+    </View>
+  )
+}
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
+
 export default function MeScreen() {
-  const theme             = useTheme()
-  const { token }         = useAuth()
+  const theme         = useTheme()
+  const { token, logout } = useAuth()
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState(false)
   const [profile,  setProfile]  = useState<UserProfile | null>(null)
@@ -58,12 +121,11 @@ export default function MeScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
-      base64: true,           // ask the picker to hand us base64 directly
+      base64: true,
     })
     if (result.canceled) return
-    const asset = result.assets[0]
-    // Prefer the base64 the picker already computed; fall back to FileSystem
-    let base64 = asset.base64
+    const asset    = result.assets[0]
+    let base64     = asset.base64
     if (!base64) {
       base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' })
     }
@@ -93,6 +155,25 @@ export default function MeScreen() {
     } finally {
       setSaving(false)
     }
+  }
+
+
+  async function handleLogout() {
+    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          // Reset check-in store so next user/session starts fresh
+          await AsyncStorage.removeItem('qs_checkin_date')  // ← add this line
+          useCheckInStore.getState().closeModal()
+          useCheckInStore.setState({ submittedToday: false, hydrated: false })
+          await logout()
+          // AuthGate in _layout will redirect to /(auth)/login automatically
+        },
+      },
+    ])
   }
 
   const inputStyle = [
@@ -125,16 +206,12 @@ export default function MeScreen() {
         <View style={styles.avatarRow}>
           <TouchableOpacity onPress={pickImage} activeOpacity={0.8} style={styles.avatarWrap}>
             {form.profile_pic_url ? (
-              <Image
-                source={{ uri: form.profile_pic_url }}
-                style={styles.avatarImage}
-              />
+              <Image source={{ uri: form.profile_pic_url }} style={styles.avatarImage} />
             ) : (
               <View style={[styles.avatarPlaceholder, { backgroundColor: theme.bgCardDeep, borderColor: theme.borderSubtle }]}>
                 <Text style={[styles.avatarInitial, { color: theme.accent }]}>{initials}</Text>
               </View>
             )}
-            {/* Edit badge */}
             <View style={[styles.editBadge, { backgroundColor: theme.accent }]}>
               <Text style={styles.editBadgeText}>✎</Text>
             </View>
@@ -242,6 +319,17 @@ export default function MeScreen() {
           secureTextEntry
         />
 
+        {/* ── Theme toggle ── */}
+        <View style={[styles.themeCard, { backgroundColor: theme.bgCard, borderColor: theme.borderSubtle }]}>
+          <View style={styles.themeCardLeft}>
+            <MetricLabel style={{ marginBottom: 2 }}>Theme</MetricLabel>
+            <Text style={[styles.themeHint, { color: theme.textFaint }]}>
+              Warm amber · Cool crimson
+            </Text>
+          </View>
+          <ThemeToggle />
+        </View>
+
         {/* ── Save ── */}
         <ActionButton
           label={saving ? 'Saving…' : 'Save changes'}
@@ -250,6 +338,16 @@ export default function MeScreen() {
           size="lg"
           fullWidth
           style={{ marginTop: SPACE.xl }}
+        />
+
+        {/* ── Logout ── */}
+        <GhostButton
+          label="Sign out"
+          onPress={handleLogout}
+          variant="danger"
+          size="lg"
+          fullWidth
+          style={{ marginTop: SPACE.md, marginBottom: SPACE.xl }}
         />
 
       </View>
@@ -282,4 +380,16 @@ const styles = StyleSheet.create({
   chipRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip:             { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8 },
   chipText:         { fontSize: 12, fontFamily: 'JetBrainsMono', letterSpacing: 0.5 },
+
+  // Theme toggle card
+  themeCard:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: SPACE.md, paddingVertical: SPACE.md, marginTop: SPACE.xl },
+  themeCardLeft:    { flex: 1 },
+  themeHint:        { fontFamily: 'JetBrainsMono', fontSize: 10, letterSpacing: 0.5 },
+
+  // Toggle
+  toggleRow:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  toggleIcon:       { fontSize: 18, width: 22, textAlign: 'center' },
+  track:            { width: 72, height: 32, borderRadius: 16, borderWidth: 1, justifyContent: 'center' },
+  nub:              { width: 24, height: 24, borderRadius: 12, position: 'absolute' },
+
 })
