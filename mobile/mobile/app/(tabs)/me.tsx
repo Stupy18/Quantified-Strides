@@ -15,6 +15,7 @@ import { useThemeContext } from '../../src/context/ThemeContext'
 import { useAuth }       from '../../src/context/AuthContext'
 import { useCheckInStore } from '../../src/store/checkInStore'
 import { apiGetMe, apiUpdateProfile, UserProfile, UpdateProfilePayload } from '../../src/api/auth'
+import { queryClient } from '../../src/api/queryClient'
 import { SPACE, RADIUS, TEXT } from '../../src/theme'
 
 type Goal   = 'athlete' | 'strength' | 'hypertrophy'
@@ -149,6 +150,7 @@ export default function MeScreen() {
       const updated = await apiUpdateProfile(token, payload)
       setProfile(updated)
       setForm(updated)
+      queryClient.invalidateQueries({ queryKey: ['profile'] })
       Alert.alert('Saved', 'Profile updated.')
     } catch {
       Alert.alert('Error', 'Failed to save profile.')
