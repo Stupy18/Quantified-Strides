@@ -4,7 +4,8 @@
       "Bash(npx expo *)",
       "Bash(npx tsc *)",
       "Bash(echo \"exit: $?\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(Remove-Item *)"
     ]
   }
 }

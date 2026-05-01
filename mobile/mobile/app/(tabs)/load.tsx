@@ -12,6 +12,7 @@ import { Hairline } from '../../src/components/primitives/Hairline'
 import { useTheme } from '../../src/hooks/useTheme'
 import { useDashboard } from '../../src/hooks/useDashboard'
 import { useTrainingHistory, useRecentWorkouts } from '../../src/hooks/useTrainingLoad'
+import { useProfile } from '../../src/hooks/useProfile'
 import { TEXT, SPACE, FONT } from '../../src/theme'
 import type { TrainingHistoryPoint, WorkoutListItem } from '../../src/api/endpoints/training'
 
@@ -107,6 +108,7 @@ export default function LoadScreen() {
   const { data: dash, isLoading: dashLoading, isError } = useDashboard()
   const { data: history, isLoading: histLoading } = useTrainingHistory(42)
   const { data: workouts } = useRecentWorkouts(14)
+  const { data: profile } = useProfile()
 
   const chart   = useMemo(() => buildChartPaths(history ?? []), [history])
   const tl      = dash?.training_load
@@ -251,7 +253,10 @@ export default function LoadScreen() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : (
-          <BodyFreshnessMap muscles={muscles} />
+          <BodyFreshnessMap
+            muscles={muscles}
+            gender={profile?.gender === 'female' ? 'female' : 'male'}
+          />
         )}
       </InfoCard>
 

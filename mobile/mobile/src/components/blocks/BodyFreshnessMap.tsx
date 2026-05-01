@@ -1,5 +1,5 @@
 import React, { useRef, useState, useMemo } from 'react'
-import { View, Text, Animated, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, Animated, TouchableOpacity, StyleSheet, Pressable } from 'react-native'
 import Svg, { G, Rect as SvgRect, Text as SvgText } from 'react-native-svg'
 import Body, { ExtendedBodyPart, Slug } from 'react-native-body-highlighter'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -175,9 +175,10 @@ function toHex(pct: number): string {
 
 interface BodyFreshnessMapProps {
   muscles?: Record<string, number>
+  gender?: 'male' | 'female'
 }
 
-export function BodyFreshnessMap({ muscles }: BodyFreshnessMapProps) {
+export function BodyFreshnessMap({ muscles, gender = 'male' }: BodyFreshnessMapProps) {
   const theme = useTheme()
   const [selected, setSelected] = useState<RegionKey | null>(null)
 
@@ -203,12 +204,13 @@ export function BodyFreshnessMap({ muscles }: BodyFreshnessMapProps) {
   }
 
   function zoomOut() {
+    setSelected(null)
     Animated.parallel([
       Animated.spring(scaleAnim,   { toValue: 1, ...SPRING }),
       Animated.spring(tyAnim,      { toValue: 0, ...SPRING }),
       Animated.timing(hintOpacity, { toValue: 1, duration: 200, delay: 80, useNativeDriver: true }),
       Animated.timing(backOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
-    ]).start(() => setSelected(null))
+    ]).start()
   }
 
   function handleRegionPress(r: RegionKey) {
@@ -246,7 +248,7 @@ export function BodyFreshnessMap({ muscles }: BodyFreshnessMapProps) {
 
   const bodyProps = {
     data:               bodyData,
-    gender:             'male' as const,
+    gender,
     scale:              BODY_SCALE,
     border:             theme.textFaint,
     defaultFill:        accent + '14',
@@ -255,7 +257,7 @@ export function BodyFreshnessMap({ muscles }: BodyFreshnessMapProps) {
   }
 
   return (
-    <>
+    <Pressable onPress={() => { if (selected !== null) zoomOut() }}>
       {/* ── Zoom container ──────────────────────────────────────────────── */}
       <View style={[styles.outerContainer, { height: BODY_H }]}>
         <View style={styles.svgClip}>
@@ -364,7 +366,7 @@ export function BodyFreshnessMap({ muscles }: BodyFreshnessMapProps) {
         />
         <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>FATIGUED</Text>
       </View>
-    </>
+    </Pressable>
   )
 }
 
