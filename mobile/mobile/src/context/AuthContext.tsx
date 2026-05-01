@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { apiLogin, apiRegister, LoginPayload, RegisterPayload } from '../api/auth'
+import { useAuthStore } from '../store/authStore'
+import { queryClient } from '../api/queryClient'
 
 const TOKEN_KEY = 'qs_token'
 const USER_KEY  = 'qs_user'
@@ -33,7 +35,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.getItem(TOKEN_KEY),
           AsyncStorage.getItem(USER_KEY),
         ])
-        if (t) setToken(t)
+        if (t) {
+          setToken(t)
+          const parsed = u ? JSON.parse(u) : null
+          if (parsed) useAuthStore.getState().setAuth(t, parsed.user_id)
+        }
         if (u) setUser(JSON.parse(u))
       } catch {
         // corrupt storage — start fresh
@@ -50,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(USER_KEY, JSON.stringify({ user_id: res.user_id, name: res.name }))
     setToken(res.access_token)
     setUser({ user_id: res.user_id, name: res.name })
+    useAuthStore.getState().setAuth(res.access_token, res.user_id)
   }
 
   async function register(payload: RegisterPayload) {
@@ -61,6 +68,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.removeItem(USER_KEY)
     setToken(null)
     setUser(null)
+    useAuthStore.getState().clearAuth()
+    queryClient.clear()
   }
 
   return (

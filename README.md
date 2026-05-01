@@ -174,6 +174,24 @@ Running · Trail Running · Mountain Biking · Cycling · Indoor Cycling · Boul
 
 ---
 
+## Mobile App
+
+React Native / Expo SDK 54 app (`mobile/mobile/`). See `mobile/CLAUDE.md` for full setup instructions and component documentation.
+
+**Running:**
+```bash
+# From mobile/mobile/
+npx expo start            # Expo Go
+npx expo start --android  # Android emulator
+npx expo start --ios      # iOS simulator
+```
+
+Set `EXPO_PUBLIC_API_URL` in `mobile/mobile/.env.development` to your machine's LAN IP before running on a physical device.
+
+**Status:** Theme system, full component library, and navigation shell complete. Load tab implemented (ATL/CTL/TSB chart, training history, wired to real API). Interactive `BodyFreshnessMap` with camera-zoom and anatomical muscle detail complete. Remaining tabs (Today, Log, History, Me) are placeholder stubs.
+
+---
+
 ## What's Built
 
 - Auth: register / login / JWT / email verification, multi-user; proper `email_verified` + `verification_token` columns
@@ -185,6 +203,7 @@ Running · Trail Running · Mountain Biking · Cycling · Indoor Cycling · Boul
 - Running biomechanics page wired end-to-end: `core/analytics/biomechanics.py` → API → React
 - pgvector RAG knowledge base with coaching transcript embeddings (`knowledge/`)
 - Narrative cache (`narrative_cache` table) — Claude only called when inputs change
+- Mobile Load tab: ATL/CTL/TSB SVG chart + training history, real API data via TanStack Query
 
 ## What's In Progress
 

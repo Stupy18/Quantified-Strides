@@ -94,14 +94,20 @@ mobile/                    ← git root for this sub-project
       hooks/
         useTheme.ts        ← returns ActiveTheme; extend later for user theme switching
         useDashboard.ts    ← TanStack Query wrapper for GET /dashboard
+        useTrainingLoad.ts ← TanStack Query wrappers: useTrainingHistory(days), useRecentWorkouts(days)
+
+      context/
+        AuthContext.tsx    ← syncs to authStore on every state change; calls queryClient.clear() on logout
 
       store/
         authStore.ts       ← Zustand: token + userId + setAuth/clearAuth
 
       api/
-        client.ts          ← axios instance; JWT interceptor reads from authStore
+        client.ts          ← axios instance; JWT interceptor reads from authStore (static import)
+        queryClient.ts     ← shared QueryClient singleton; imported by _layout and AuthContext
         endpoints/
           dashboard.ts     ← fetchDashboard()
+          training.ts      ← fetchTrainingHistory(days), fetchRecentWorkouts(days)
 
       components/
         primitives/        ← atoms — self-contained, call useTheme() internally
@@ -196,12 +202,30 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
 - Theme system (both warm and cool themes, full typography/spacing/radius scales)
 - Complete component library — all primitives, blocks, and layout wrappers
 - Navigation shell — Expo Router 5-tab layout with themed tab bar
-- API client with JWT interceptor
-- Auth store (Zustand)
+- API client with JWT interceptor (static import, no async hack)
+- Auth store (Zustand) + `AuthContext` (syncs store, clears query cache on logout)
 - Dashboard endpoint + `useDashboard` query hook
+- Training endpoints + `useTrainingLoad` hook (`useTrainingHistory(days)`, `useRecentWorkouts(days)`)
+- Shared `QueryClient` singleton (`src/api/queryClient.ts`) used by both root layout and AuthContext
 - Font loading with splash screen gate
 - `.env.development` for local API URL
 - Docker service (`mobile` in `docker-compose.yml`) — Metro runs in container, ports 19000/19001/8081
+- **Load tab** (`app/(tabs)/load.tsx`) — fully implemented with real API data:
+  - ATL/CTL/TSB line chart (custom SVG, pulls 42 days of training history)
+  - Ramp rate indicator
+  - Recent workout history list with sport badges (14-day window)
+  - Wired to backend via `useTrainingHistory` + `useRecentWorkouts`
+- **`BodyFreshnessMap`** (`src/components/blocks/BodyFreshnessMap.tsx`) — fully built:
+  - Camera-zoom model: full body SVG always rendered, zoom is a translate/scale transform
+  - Per-region freshness coloring in full-body view; per-muscle coloring when zoomed
+  - Anatomical detail shapes when zoomed (region-specific, not visible in full-body view):
+    - Shoulders: rounded deltoid ellipses + side-delt accent + trapezius rect
+    - Arms: biceps oval (front) + triceps rect (back) per arm; forearms separate
+    - Core: split abs columns with tendinous intersections; paired erector spinae ellipses
+    - Legs: glute caps + split quad/ham rects (vastus lateralis / rectus femoris / bicep femoris)
+    - Calves: two-headed gastrocnemius + tibialis rect + peroneals rect
+  - Labels float beside each shape (not on top) showing full muscle name + freshness %
+  - Spring animation (tension 110, friction 14) with calibrated FOCAL_Y per region
 
 ## Known Issue — White Screen on Device (unresolved)
 
@@ -251,11 +275,7 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
 - "Begin — out the door" CTA button
 - Check-in bottom sheet (morning readiness form)
 
-**Load tab:**
-- ATL/CTL/TSB chart (time-series line chart — needs a charting library or custom SVG)
-- Training load history list
-- Ramp rate indicator
-- HRV trend chart
+**Load tab:** Built — ATL/CTL/TSB chart, ramp rate, workout history list, all wired to real API. HRV trend chart still pending.
 
 **Log tab:**
 - Session type selector (Run / Strength / Bike / Climb)

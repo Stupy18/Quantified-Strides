@@ -451,7 +451,7 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
 - **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
 - **`db/session.py` stale async engine** — defines a second `create_async_engine` instance alongside the canonical one in `deps.py`; ingestion files use the `db/session` one. Should be consolidated so there is a single engine/pool.
-- **Mobile app** (`mobile/mobile/`) — scaffold, theme, component library, and navigation shell are built; all screens are placeholder stubs; bundle compiles but **renders a white screen** in Expo Go (runtime issue, unresolved). See `mobile/CLAUDE.md` → "Known Issue" section for diagnosis notes and debug steps.
+- **Mobile app** (`mobile/mobile/`) — scaffold, theme, component library, and navigation shell built; Load tab fully implemented with real API data (ATL/CTL/TSB SVG chart, ramp rate, workout history list); `BodyFreshnessMap` complete with camera-zoom, per-muscle freshness coloring, and anatomical detail shapes; remaining tabs (Today, Log, History, Me) are placeholder stubs; bundle compiles but **renders a white screen** in Expo Go (runtime issue, unresolved). See `mobile/CLAUDE.md` → "Known Issue" section for diagnosis notes and debug steps.
 
 ## What Doesn't Exist Yet
 
