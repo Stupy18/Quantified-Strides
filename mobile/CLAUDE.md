@@ -59,6 +59,7 @@ npm install <package> --legacy-peer-deps
 | State | Zustand (auth) + TanStack Query (server state) |
 | HTTP | Axios with JWT interceptor |
 | Charts | react-native-svg (SparklineChart built on top) |
+| Body map | react-native-body-highlighter ^3.2.0 (male anatomical SVG paths) |
 | Fonts | expo-font — Newsreader, JetBrains Mono, Geist |
 
 ## Project Structure
@@ -216,16 +217,13 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
   - Recent workout history list with sport badges (14-day window)
   - Wired to backend via `useTrainingHistory` + `useRecentWorkouts`
 - **`BodyFreshnessMap`** (`src/components/blocks/BodyFreshnessMap.tsx`) — fully built:
-  - Camera-zoom model: full body SVG always rendered, zoom is a translate/scale transform
-  - Per-region freshness coloring in full-body view; per-muscle coloring when zoomed
-  - Anatomical detail shapes when zoomed (region-specific, not visible in full-body view):
-    - Shoulders: rounded deltoid ellipses + side-delt accent + trapezius rect
-    - Arms: biceps oval (front) + triceps rect (back) per arm; forearms separate
-    - Core: split abs columns with tendinous intersections; paired erector spinae ellipses
-    - Legs: glute caps + split quad/ham rects (vastus lateralis / rectus femoris / bicep femoris)
-    - Calves: two-headed gastrocnemius + tibialis rect + peroneals rect
-  - Labels float beside each shape (not on top) showing full muscle name + freshness %
-  - Spring animation (tension 110, friction 14) with calibrated FOCAL_Y per region
+  - Uses `react-native-body-highlighter` (male, `gender="male"`) for real anatomical SVG paths — front + back figures side by side at `scale=0.5` (each 100×200px)
+  - Per-slug freshness coloring: `SLUG_MUSCLES` maps each library slug to our internal muscle keys; freshness drives fill opacity (`accent + toHex(pct)`)
+  - Untracked parts (head, hair, hands, feet, knees, ankles) get a faint `defaultFill` silhouette
+  - Camera-zoom model: `Animated.View` with spring scale + translateY wraps both Body components; clips at container height
+  - `SLUG_REGION` maps library slugs to our 5 regions (shoulders/arms/core/legs/calves) — pressing any body part triggers region zoom
+  - Zoomed view: muscle breakdown labels (name + %) rendered as React Native Text below the body, one entry per muscle group in the region
+  - Spring animation (tension 110, friction 14) with `FOCAL_Y` calibrated to the library's body proportions
 
 ## Known Issue — White Screen on Device (unresolved)
 
