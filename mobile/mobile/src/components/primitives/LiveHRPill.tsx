@@ -27,7 +27,10 @@ export function LiveHRPill({ bpm }: LiveHRPillProps) {
   return (
     <View style={styles.pill}>
       <Animated.View style={[styles.dot, { opacity: pulse, transform: [{ scale: pulse.interpolate({ inputRange: [0.5, 1], outputRange: [1, 1.15] }) }] }]} />
-      <Text style={[TEXT.monoLarge, styles.bpm]}>HR · {bpm}</Text>
+      <View style={styles.column}>
+        <Text style={[TEXT.monoSmall, styles.bpm]}>HR ·</Text>
+        <Text style={[TEXT.monoLarge, styles.bpm]}>{bpm}</Text>
+      </View>
       <Text style={[TEXT.monoSmall, { color: theme.textMuted }]}>LIVE</Text>
     </View>
   )
@@ -38,11 +41,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderRadius: 14,
     paddingHorizontal: SPACE.sm + 2,
-    paddingVertical: 4,
+    paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
+  column: { alignItems: 'flex-start' },
   dot: {
     width: 7,
     height: 7,

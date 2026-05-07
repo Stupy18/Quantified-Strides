@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet } from 'react-native'
+import { useEffect, useState } from 'react'
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { InfoCard }       from '../../src/components/blocks/InfoCard'
 import { MetricTile }     from '../../src/components/blocks/MetricTile'
@@ -9,98 +10,166 @@ import { StatusBadge }    from '../../src/components/primitives/StatusBadge'
 import { ActionButton }   from '../../src/components/primitives/ActionButton'
 import { MiniBarChart }   from '../../src/components/primitives/MiniBarChart'
 import { LiveHRPill }     from '../../src/components/primitives/LiveHRPill'
+import { useDashboard }   from '../../src/hooks/useDashboard'
+import { useAuth }        from '../../src/context/AuthContext'
 import { useTheme }       from '../../src/hooks/useTheme'
 import { TEXT, SPACE, RADIUS } from '../../src/theme'
 
-// Mirrors the shape of DashboardSchema so swapping to useDashboard() later
-// is a one-line change.
-const MOCK = {
-  user:        { name: 'Vlad', city: 'Cluj' },
-  liveHR:      58,
-  greeting:    'Good morning,',
-  narrative:   'The nervous system is generous today.',
-  prescription: {
-    tag:      'Z2 · Aerobic',
-    headline: 'A quiet aerobic hour,',
-    headlineItalic: 'on soft ground.',
-    why:      'Form is fresh, heart steady, last night gave you an honest seven. Bank the fitness without spending it.',
-    metrics:  [
-      { label: 'Time',  value: '60–75 min' },
-      { label: 'Heart', value: '145–158 bpm' },
-      { label: 'Pace',  value: '5:20–45' },
-    ],
-    duration: '65 min',
-  },
-  hrv: {
-    value:    72,
-    unit:     'ms',
-    badge:    '+4 above',
-    history:  [64, 62, 66, 68, 65, 70, 72],
-    caption:  'Four above baseline. A generous read.',
-  },
-  sleep: {
-    value:    7.4,
-    unit:     'h · 82',
-    badge:    'honest',
-    history:  [6, 8, 5, 9, 7, 4, 7.4],
-    caption:  'Not a full measure — but earned.',
-  },
+// Fields the backend doesn't expose yet — keep as static fallbacks until
+// the dashboard schema is extended.
+const FALLBACK = {
+  city:          'Cluj',
+  liveHR:        58,
+  hrvHistory:    [64, 62, 66, 68, 65, 70, 72],
+  sleepHistory:  [6, 8, 5, 9, 7, 4, 7.4],
+  heartTarget:   '145–158 bpm',
+  paceTarget:    '5:20–45',
+  hrvCaption:    'A read worth trusting.',
+  sleepCaption:  'Last night, in your own bed.',
 }
 
-function formatHeader(city: string) {
-  const now = new Date()
+function formatHeader(city: string, now: Date) {
   const day = now.toLocaleDateString('en-US', { weekday: 'long' })
   const md  = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   const hm  = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-  return `${day} · ${md} · ${hm} · ${city}`
+  return `${day} · ${md} · ${hm} ·\n${city}`
+}
+
+function greetingFor(now: Date): string {
+  const h = now.getHours()
+  if (h < 12) return 'Good morning,'
+  if (h < 18) return 'Good afternoon,'
+  return 'Good evening,'
+}
+
+function formatHrvBadge(deviation: number | null | undefined): string | undefined {
+  if (deviation == null) return undefined
+  const rounded = Math.round(deviation)
+  if (rounded === 0) return 'baseline'
+  return rounded > 0 ? `+${rounded} above` : `${rounded} below`
+}
+
+// Backend returns recommendation.primary as a single string (e.g. "Z2 Bike + Upper Gym").
+// Split at the first comma to recreate the two-tone serif headline; if there's no
+// comma, the second line is empty and only the first line renders.
+function splitHeadline(primary: string | null | undefined): [string, string] {
+  if (!primary) return ['', '']
+  const i = primary.indexOf(',')
+  if (i === -1) return [primary, '']
+  return [primary.slice(0, i + 1), primary.slice(i + 1).trim()]
 }
 
 export default function TodayScreen() {
   const theme = useTheme()
-  const headerLine = formatHeader(MOCK.user.city)
+  const { user } = useAuth()
+  const { data, isLoading, error } = useDashboard()
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    // Align the first tick to the top of the next minute, then tick every 60s.
+    let interval: ReturnType<typeof setInterval> | null = null
+    const timeout = setTimeout(() => {
+      setNow(new Date())
+      interval = setInterval(() => setNow(new Date()), 60_000)
+    }, 60_000 - (Date.now() % 60_000))
+    return () => {
+      clearTimeout(timeout)
+      if (interval) clearInterval(interval)
+    }
+  }, [])
+
+  if (isLoading) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.accent} />
+        </View>
+      </ScreenWrapper>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.center}>
+          <Text style={[TEXT.bodyMedium, { color: theme.textMuted }]}>
+            Couldn't load today's dashboard.
+          </Text>
+        </View>
+      </ScreenWrapper>
+    )
+  }
+
+  const headerLine     = formatHeader(FALLBACK.city, now)
+  const greeting       = greetingFor(now)
+  const name           = user?.name ?? 'there'
+
+  const rec            = data.recommendation
+  const [head1, head2] = splitHeadline(rec?.primary)
+  const tagLabel       = rec?.intensity ? rec.intensity : 'Today'
+  const duration       = rec?.duration ?? '—'
+
+  const hrvValue       = data.hrv_status?.last_hrv != null ? Math.round(data.hrv_status.last_hrv) : '—'
+  const hrvBadge       = formatHrvBadge(data.hrv_status?.deviation)
+
+  const sleepDuration  = data.sleep?.duration != null ? data.sleep.duration.toFixed(1) : '—'
+  const sleepScore     = data.sleep?.score != null ? Math.round(data.sleep.score) : null
+  const sleepUnit      = sleepScore != null ? `h · ${sleepScore}` : 'h'
 
   return (
-    <ScreenWrapper>
+    <ScreenWrapper style={{ paddingBottom: SPACE.md }}>
       {/* Status row */}
       <View style={styles.statusRow}>
-        <Text style={[TEXT.monoMedium, { color: theme.textMuted, flex: 1 }]} numberOfLines={1}>
+        <Text style={[TEXT.monoMedium, { color: theme.textMuted, flex: 1 }]}>
           {headerLine.toUpperCase()}
         </Text>
-        <LiveHRPill bpm={MOCK.liveHR} />
+        <LiveHRPill bpm={FALLBACK.liveHR} />
       </View>
 
       {/* Hero greeting */}
       <View style={{ marginTop: SPACE.md }}>
         <Text style={[TEXT.displayLarge, { color: theme.textPrimary, lineHeight: 46 }]}>
-          {MOCK.greeting}
+          {greeting}
         </Text>
         <Text style={[TEXT.displayLarge, styles.italicAccent, { color: theme.accent, lineHeight: 46 }]}>
-          {MOCK.user.name}.
+          {name}.
         </Text>
-        <Text style={[TEXT.narrativeLarge, { color: theme.textMuted, marginTop: SPACE.md }]}>
-          “{MOCK.narrative}”
-        </Text>
+        {rec?.narrative && (
+          <Text style={[TEXT.narrativeLarge, { color: theme.textMuted, marginTop: SPACE.md }]}>
+            “{rec.narrative}”
+          </Text>
+        )}
       </View>
 
       {/* Prescription card */}
       <InfoCard style={{ marginTop: SPACE.xl }}>
         <View style={styles.cardHeader}>
           <MetricLabel style={{ marginBottom: 0 }}>Today's Prescription</MetricLabel>
-          <StatusBadge label={MOCK.prescription.tag} variant="filled" />
+          <StatusBadge label={tagLabel} variant="filled" />
         </View>
         <Hairline />
-        <Text style={[TEXT.displaySmall, { color: theme.textPrimary, marginTop: SPACE.md, lineHeight: 30 }]}>
-          {MOCK.prescription.headline}
-        </Text>
-        <Text style={[TEXT.displaySmall, styles.italicAccent, { color: theme.accent, lineHeight: 30, marginBottom: SPACE.md }]}>
-          {MOCK.prescription.headlineItalic}
-        </Text>
-        <Text style={[TEXT.bodyMedium, { color: theme.textMuted, marginBottom: SPACE.lg }]}>
-          {MOCK.prescription.why}
-        </Text>
+        {head1 ? (
+          <Text style={[TEXT.displaySmall, { color: theme.textPrimary, marginTop: SPACE.md, lineHeight: 30 }]}>
+            {head1}
+          </Text>
+        ) : null}
+        {head2 ? (
+          <Text style={[TEXT.displaySmall, styles.italicAccent, { color: theme.accent, lineHeight: 30, marginBottom: SPACE.md }]}>
+            {head2}
+          </Text>
+        ) : null}
+        {rec?.why ? (
+          <Text style={[TEXT.bodyMedium, { color: theme.textMuted, marginTop: head2 ? 0 : SPACE.md, marginBottom: SPACE.lg }]}>
+            {rec.why}
+          </Text>
+        ) : null}
 
         <View style={styles.metricRow}>
-          {MOCK.prescription.metrics.map(m => (
+          {[
+            { label: 'Time',  value: duration },
+            { label: 'Heart', value: FALLBACK.heartTarget },
+            { label: 'Pace',  value: FALLBACK.paceTarget },
+          ].map(m => (
             <View key={m.label} style={[styles.metricChip, { backgroundColor: theme.bgCardDeep }]}>
               <Text style={[TEXT.monoSmall, { color: theme.textMuted }]}>{m.label.toUpperCase()}</Text>
               <Text style={[TEXT.bodyMedium, { color: theme.textPrimary, marginTop: 4 }]}>{m.value}</Text>
@@ -114,7 +183,7 @@ export default function TodayScreen() {
           variant="alert"
           size="lg"
           fullWidth
-          rightLabel={`est. ${MOCK.prescription.duration}`}
+          rightLabel={`est. ${duration}`}
         />
       </InfoCard>
 
@@ -122,21 +191,20 @@ export default function TodayScreen() {
 
       <View style={styles.tileRow}>
         <MetricTile
-          label="HRV · RMSSD"
-          value={MOCK.hrv.value}
-          unit={MOCK.hrv.unit}
-          badgeLabel={MOCK.hrv.badge}
-          sparklineData={MOCK.hrv.history}
-          caption={MOCK.hrv.caption}
+          label={'HRV ·\nRMSSD'}
+          value={hrvValue}
+          unit="ms"
+          badgeLabel={hrvBadge}
+          sparklineData={FALLBACK.hrvHistory}
+          caption={FALLBACK.hrvCaption}
         />
         <View style={{ width: SPACE.sm }} />
         <MetricTile
-          label="Sleep · Night"
-          value={MOCK.sleep.value}
-          unit={MOCK.sleep.unit}
-          badgeLabel={MOCK.sleep.badge}
-          chart={<MiniBarChart dataPoints={MOCK.sleep.history} height={32} />}
-          caption={MOCK.sleep.caption}
+          label={'Sleep ·\nNight'}
+          value={sleepDuration}
+          unit={sleepUnit}
+          chart={<MiniBarChart dataPoints={FALLBACK.sleepHistory} height={32} />}
+          caption={FALLBACK.sleepCaption}
         />
       </View>
     </ScreenWrapper>
@@ -144,6 +212,7 @@ export default function TodayScreen() {
 }
 
 const styles = StyleSheet.create({
+  center:        { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: SPACE.xxl },
   statusRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: SPACE.sm, gap: SPACE.sm },
   cardHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACE.sm },
   italicAccent:  { fontFamily: 'Newsreader_Italic' },

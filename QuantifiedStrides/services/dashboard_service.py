@@ -158,8 +158,11 @@ class DashboardService:
     def _map_sleep(self, s: dict | None) -> SleepSummarySchema | None:
         if not s:
             return None
+        # SleepSummarySchema.duration is documented as hours; the repo returns
+        # duration_minutes — convert here so all clients see consistent units.
+        duration_min = s.get("duration")
         return SleepSummarySchema(
-            duration=s.get("duration"),
+            duration=duration_min / 60 if duration_min is not None else None,
             score=s.get("score"),
             hrv=s.get("hrv"),
             rhr=s.get("rhr"),
