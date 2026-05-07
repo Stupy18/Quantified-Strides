@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { View, TextInput, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform } from 'react-native'
+import { View, TextInput, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { SectionTitle }  from '../../src/components/primitives/SectionTitle'
 import { MetricLabel }   from '../../src/components/primitives/MetricLabel'
 import { ActionButton }  from '../../src/components/primitives/ActionButton'
+import { GhostButton }   from '../../src/components/primitives/GhostButton'
+import { SportPickerMobile } from '../../src/components/blocks/SportPickerMobile'
 import { useAuth }       from '../../src/context/AuthContext'
 import { useTheme }      from '../../src/hooks/useTheme'
 import { SPACE, RADIUS, TEXT } from '../../src/theme'
@@ -187,8 +189,16 @@ function StepCredentials({
         </>
       )}
 
-      {/* ── Gender ───────────────────────────────────────────────────── */}
-      <MetricLabel style={{ marginTop: SPACE.md }}>Gender</MetricLabel>
+      {/* ── Biological sex ───────────────────────────────────────────── */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: SPACE.md, marginBottom: 10 }}>
+        <MetricLabel style={{ marginBottom: 0 }}>Biological sex</MetricLabel>
+        <TouchableOpacity
+          onPress={() => Alert.alert('Why we ask this', 'Biological sex is used solely for accurate athletic benchmarking; Things like VO2max norms and recovery baselines differ physiologically. It has nothing to do with how you identify.')}
+          style={{ marginLeft: 6 }}
+        >
+          <Text style={{ fontFamily: 'JetBrainsMono', fontSize: 11, color: theme.textFaint }}>ⓘ</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.chipRow}>
         {GENDERS.map(g => (
           <TouchableOpacity
@@ -219,13 +229,11 @@ function StepCredentials({
 // ─── Step 2: Sport profile ────────────────────────────────────────────────────
 
 function StepProfile({
-  data, onChange, onSubmit, loading, error,
+  data, onChange, onNext,
 }: {
   data: FormData
   onChange: (k: keyof FormData, v: any) => void
-  onSubmit: () => void
-  loading: boolean
-  error: string | null
+  onNext: () => void
 }) {
   const theme = useTheme()
 
@@ -280,23 +288,67 @@ function StepProfile({
         ))}
       </View>
 
+      <ActionButton
+        label="Continue →"
+        onPress={onNext}
+        variant="accent"
+        size="lg"
+        fullWidth
+        style={{ marginTop: SPACE.lg }}
+      />
+    </View>
+  )
+}
+
+// ─── Step 3: Your sports ──────────────────────────────────────────────────────
+
+function StepSports({
+  data, onChange, onSubmit, onSkip, loading, error,
+}: {
+  data: FormData
+  onChange: (k: keyof FormData, v: any) => void
+  onSubmit: () => void
+  onSkip: () => void
+  loading: boolean
+  error: string | null
+}) {
+  const theme = useTheme()
+
+  return (
+    <View>
+      <SectionTitle title="Your sports" />
       <Text style={[styles.hint, { color: theme.textFaint }]}>
-        You can add specific sports and priorities in your profile after signing up.
+        Select sports you train and set each one's priority (1 = light, 5 = primary focus).
       </Text>
+
+      <SportPickerMobile
+        value={data.primary_sports}
+        onChange={v => onChange('primary_sports', v)}
+      />
 
       {error && <Text style={[styles.error, { color: theme.bgAlert }]}>{error}</Text>}
 
       {loading
         ? <ActivityIndicator color={theme.accent} style={{ marginTop: SPACE.lg }} />
         : (
-          <ActionButton
-            label="Create account"
-            onPress={onSubmit}
-            variant="accent"
-            size="lg"
-            fullWidth
-            style={{ marginTop: SPACE.lg }}
-          />
+          <>
+            <ActionButton
+              label="Create account"
+              onPress={onSubmit}
+              variant="accent"
+              size="lg"
+              fullWidth
+              style={{ marginTop: SPACE.lg }}
+            />
+            <GhostButton
+              label="Skip for now"
+              onPress={onSkip}
+              variant="default"
+              size="md"
+              fullWidth
+              style={{ marginTop: SPACE.sm }}
+            />
+          </>
         )
       }
     </View>
@@ -348,7 +400,7 @@ export default function RegisterScreen() {
     setData(p => ({ ...p, [k]: v }))
   }
 
-  async function submit() {
+  async function submit(sports?: Record<string, number>) {
     setError(null)
     setLoading(true)
     try {
@@ -358,11 +410,11 @@ export default function RegisterScreen() {
         password:        data.password,
         goal:            data.goal,
         gym_days_week:   data.gym_days_week,
-        primary_sports:  data.primary_sports,
+        primary_sports:  sports ?? data.primary_sports,
         ...(data.date_of_birth ? { date_of_birth: data.date_of_birth } : {}),
         ...(data.gender        ? { gender:        data.gender }        : {}),
       })
-      setStep(3)
+      setStep(4)
     } catch (err: any) {
       const msg = err.message?.includes('400') || err.message?.toLowerCase().includes('exist')
         ? 'Email already registered'
@@ -374,24 +426,25 @@ export default function RegisterScreen() {
   }
 
   return (
-    <ScreenWrapper>
+    <ScreenWrapper scrollable>
       <View style={styles.container}>
 
         {/* Header */}
         <View style={styles.header}>
           <Text style={[styles.appName, { color: theme.accent }]}>QUANTIFIEDSTRIDES</Text>
-          {step < 3 && <StepDots current={step} total={2} />}
+          {step < 4 && <StepDots current={step} total={3} />}
         </View>
 
         {/* Card */}
         <View style={[styles.card, { backgroundColor: theme.bgCard, borderColor: theme.borderSubtle }]}>
           {step === 1 && <StepCredentials data={data} onChange={onChange} onNext={() => setStep(2)} />}
-          {step === 2 && <StepProfile data={data} onChange={onChange} onSubmit={submit} loading={loading} error={error} />}
-          {step === 3 && <StepVerify email={data.email} onBack={() => router.replace('/(auth)/login')} />}
+          {step === 2 && <StepProfile data={data} onChange={onChange} onNext={() => setStep(3)} />}
+          {step === 3 && <StepSports data={data} onChange={onChange} onSubmit={() => submit()} onSkip={() => submit({})} loading={loading} error={error} />}
+          {step === 4 && <StepVerify email={data.email} onBack={() => router.replace('/(auth)/login')} />}
         </View>
 
         {/* Switch to login */}
-        {step < 3 && (
+        {step < 4 && (
           <ActionButton
             label="Already have an account? Sign in"
             onPress={() => router.push('/(auth)/login')}

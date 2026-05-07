@@ -11,6 +11,7 @@ import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { MetricLabel }   from '../../src/components/primitives/MetricLabel'
 import { ActionButton }  from '../../src/components/primitives/ActionButton'
 import { GhostButton }   from '../../src/components/primitives/GhostButton'
+import { SportPickerMobile } from '../../src/components/blocks/SportPickerMobile'
 import { useTheme }      from '../../src/hooks/useTheme'
 import { useThemeContext } from '../../src/context/ThemeContext'
 import { useAuth }       from '../../src/context/AuthContext'
@@ -138,6 +139,7 @@ function SettingsModal({ visible, onClose, profile, onSaved, token }: SettingsMo
         gender:          form.gender,
         goal:            form.goal,
         gym_days_week:   form.gym_days_week,
+        primary_sports:  form.primary_sports ?? {},
         garmin_email:    form.garmin_email,
         garmin_password: form.garmin_password,
         ...(form.profile_pic_url ? { profile_pic_url: form.profile_pic_url } : {}),
@@ -196,7 +198,15 @@ function SettingsModal({ visible, onClose, profile, onSaved, token }: SettingsMo
             <TextInput style={inputStyle} value={form.name ?? ''} onChangeText={v => set('name', v)} autoCorrect={false} />
 
             {/* Biological sex */}
-            <MetricLabel style={{ marginTop: SPACE.md }}>Biological sex</MetricLabel>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: SPACE.md, marginBottom: 10 }}>
+              <MetricLabel style={{ marginBottom: 0 }}>Biological sex</MetricLabel>
+              <TouchableOpacity
+                onPress={() => Alert.alert('Why we ask this', 'Biological sex is used solely for accurate athletic benchmarking; Things like VO2max norms and recovery baselines differ physiologically. It has nothing to do with how you identify.')}
+                style={{ marginLeft: 6 }}
+              >
+                <Text style={{ fontFamily: 'JetBrainsMono', fontSize: 11, color: theme.textFaint }}>ⓘ</Text>
+              </TouchableOpacity>
+            </View>
             <View style={settingsStyles.chipRow}>
               {GENDERS.map(g => (
                 <TouchableOpacity key={g.key} onPress={() => set('gender', g.key)}
@@ -236,6 +246,16 @@ function SettingsModal({ visible, onClose, profile, onSaved, token }: SettingsMo
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Active sports */}
+            <MetricLabel style={{ marginTop: SPACE.md }}>Active sports</MetricLabel>
+            <Text style={{ fontFamily: 'JetBrainsMono', fontSize: 10, color: theme.textFaint, marginBottom: SPACE.sm, lineHeight: 16 }}>
+              Tap to toggle. Set priority 1 (light) → 5 (primary focus).
+            </Text>
+            <SportPickerMobile
+              value={form.primary_sports ?? {}}
+              onChange={v => set('primary_sports', v)}
+            />
 
             {/* Garmin */}
             <MetricLabel style={{ marginTop: SPACE.md }}>Garmin Connect</MetricLabel>
