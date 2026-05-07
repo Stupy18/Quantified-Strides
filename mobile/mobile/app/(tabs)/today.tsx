@@ -117,7 +117,7 @@ export default function TodayScreen() {
   const sleepUnit      = sleepScore != null ? `h · ${sleepScore}` : 'h'
 
   return (
-    <ScreenWrapper style={{ paddingBottom: SPACE.md }}>
+    <ScreenWrapper style={{ paddingBottom: 0 }} contentContainerStyle={{ paddingBottom: SPACE.lg }}>
       {/* Status row */}
       <View style={styles.statusRow}>
         <Text style={[TEXT.monoMedium, { color: theme.textMuted, flex: 1 }]}>
