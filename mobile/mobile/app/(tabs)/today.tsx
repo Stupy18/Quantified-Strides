@@ -108,6 +108,8 @@ export default function TodayScreen() {
   const [head1, head2] = splitHeadline(rec?.primary)
   const tagLabel       = rec?.intensity ? rec.intensity : 'Today'
   const duration       = rec?.duration ?? '—'
+  // No actionable session means a true rest day — hide chips + CTA.
+  const isRestDay      = rec?.intensity == null && rec?.duration == null
 
   const hrvValue       = data.hrv_status?.last_hrv != null ? Math.round(data.hrv_status.last_hrv) : '—'
   const hrvBadge       = formatHrvBadge(data.hrv_status?.deviation)
@@ -164,27 +166,31 @@ export default function TodayScreen() {
           </Text>
         ) : null}
 
-        <View style={styles.metricRow}>
-          {[
-            { label: 'Time',  value: duration },
-            { label: 'Heart', value: FALLBACK.heartTarget },
-            { label: 'Pace',  value: FALLBACK.paceTarget },
-          ].map(m => (
-            <View key={m.label} style={[styles.metricChip, { backgroundColor: theme.bgCardDeep }]}>
-              <Text style={[TEXT.monoSmall, { color: theme.textMuted }]}>{m.label.toUpperCase()}</Text>
-              <Text style={[TEXT.bodyMedium, { color: theme.textPrimary, marginTop: 4 }]}>{m.value}</Text>
+        {!isRestDay && (
+          <>
+            <View style={styles.metricRow}>
+              {[
+                { label: 'Time',  value: duration },
+                { label: 'Heart', value: FALLBACK.heartTarget },
+                { label: 'Pace',  value: FALLBACK.paceTarget },
+              ].map(m => (
+                <View key={m.label} style={[styles.metricChip, { backgroundColor: theme.bgCardDeep }]}>
+                  <Text style={[TEXT.monoSmall, { color: theme.textMuted }]}>{m.label.toUpperCase()}</Text>
+                  <Text style={[TEXT.bodyMedium, { color: theme.textPrimary, marginTop: 4 }]}>{m.value}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
 
-        <ActionButton
-          label="Begin — out the door"
-          onPress={() => {}}
-          variant="alert"
-          size="lg"
-          fullWidth
-          rightLabel={`est. ${duration}`}
-        />
+            <ActionButton
+              label="Begin — out the door"
+              onPress={() => {}}
+              variant="alert"
+              size="lg"
+              fullWidth
+              rightLabel={`est. ${duration}`}
+            />
+          </>
+        )}
       </InfoCard>
 
       <SectionTitle title="This morning · the body's account" rightLabel="All →" />
