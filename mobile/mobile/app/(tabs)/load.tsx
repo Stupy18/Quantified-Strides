@@ -14,7 +14,8 @@ import { useDashboard } from '../../src/hooks/useDashboard'
 import { useTrainingHistory, useRecentWorkouts } from '../../src/hooks/useTrainingLoad'
 import { useProfile } from '../../src/hooks/useProfile'
 import { TEXT, SPACE, FONT } from '../../src/theme'
-import type { TrainingHistoryPoint, WorkoutListItem } from '../../src/api/endpoints/training'
+import type { TrainingHistoryPoint } from '../../src/api/endpoints/training'
+import { sportTag, workoutTitle, workoutSubtitle, formatWorkoutDate } from '../../src/utils/workout'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,47 +39,6 @@ function formatFormHeadline(label: string): { pre: string; italic: string } {
 function formatDashboardDate(d: string): string {
   const date = new Date(d)
   return `${date.toLocaleDateString('en-US', { weekday: 'long' })} · ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-}
-
-function formatDuration(seconds: number | null): string {
-  if (!seconds) return ''
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function formatWorkoutDate(dateStr: string): string {
-  return new Date(dateStr)
-    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    .toUpperCase()
-}
-
-const SPORT_TAGS: Record<string, string> = {
-  running:           'RUN',
-  trail_running:     'TRAIL',
-  cycling:           'BIKE',
-  mountain_biking:   'MTB',
-  strength_training: 'GYM',
-  climbing:          'CLIMB',
-  swimming:          'SWIM',
-  hiking:            'HIKE',
-  skiing:            'SKI',
-  snowboarding:      'SNW',
-}
-
-function sportTag(sport: string): string {
-  return SPORT_TAGS[sport] ?? sport.toUpperCase().slice(0, 5)
-}
-
-function workoutTitle(item: WorkoutListItem): string {
-  return item.workout_type ?? sportTag(item.sport)
-}
-
-function workoutSubtitle(item: WorkoutListItem): string {
-  const parts: string[] = []
-  if (item.duration_s) parts.push(formatDuration(item.duration_s))
-  if (item.distance_m && item.distance_m > 100) parts.push(`${(item.distance_m / 1000).toFixed(1)} km`)
-  return parts.join(' · ')
 }
 
 function buildChartPaths(points: TrainingHistoryPoint[]): {

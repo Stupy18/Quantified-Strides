@@ -16,3 +16,11 @@ export function useRecentWorkouts(days = 14) {
     staleTime: 1000 * 60 * 5,
   })
 }
+
+export function useWorkoutHistory(days = 90) {
+  return useQuery({
+    queryKey: ['workout-history', days],
+    queryFn: () => fetchRecentWorkouts(days),
+    staleTime: 1000 * 60 * 5,
+  })
+}
