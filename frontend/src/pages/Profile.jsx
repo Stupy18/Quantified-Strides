@@ -115,9 +115,15 @@ export default function Profile() {
             className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
 
-        {/* Gender */}
+        {/* Biological sex */}
         <div className="space-y-1">
-          <label className="text-sm font-medium">Gender</label>
+          <label className="text-sm font-medium flex items-center gap-1">
+            Biological sex
+            <span
+              title="Biological sex is used solely for accurate athletic benchmarking — things like VO2max norms and recovery baselines differ physiologically. It has nothing to do with how you identify."
+              className="text-muted-foreground cursor-help text-xs"
+            >ⓘ</span>
+          </label>
           <select value={form.gender} onChange={e => set('gender', e.target.value)}
             className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
             {GENDERS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
