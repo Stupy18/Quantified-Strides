@@ -1,6 +1,6 @@
 # Current State — QuantifiedStrides
 
-> **Last updated:** 2026-05-12
+> **Last updated:** 2026-05-12 (end of session)
 > **Active integration branch:** `dev`
 > **Rule:** Update this file at the end of every session. If it's stale, update it before starting work.
 
@@ -48,7 +48,9 @@
 - Mobile: Load tab fully wired (ATL/CTL/TSB chart, ramp rate, workout history)
 - Mobile: BodyFreshnessMap (camera-zoom, anatomical SVG, per-muscle freshness)
 - Mobile: Today tab wired to `/dashboard` API
-- Protocols: `PROTOCOL.md`, `WORKFLOW.md`, `AGENTS.md`, `CURRENT.md` created
+- Operating protocol: `PROTOCOL.md`, `CURRENT.md`, `WORKFLOW.md`, `AGENTS.md`, `TEAM_GUIDE.md`, `.claude/settings.json` (hooks) — committed to dev
+- Notion wiki: 15+ pages built via API (Onboarding, Product, Research, Meetings, Operations)
+- Memory system: 4 feedback/project memories saved for future sessions
 
 ---
 
