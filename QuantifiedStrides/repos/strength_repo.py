@@ -190,8 +190,11 @@ class StrengthRepo:
     ) -> int:
         result = await self.db.execute(
             text("""
-                INSERT INTO strength_exercises (session_id, exercise_order, name, notes)
-                VALUES (:sid, :order, :name, :notes)
+                INSERT INTO strength_exercises (session_id, exercise_order, name, notes, exercise_ref_id)
+                VALUES (
+                    :sid, :order, :name, :notes,
+                    (SELECT exercise_id FROM exercises WHERE LOWER(name) = LOWER(:name) LIMIT 1)
+                )
                 RETURNING exercise_id
             """),
             {"sid": session_id, "order": exercise_order, "name": name, "notes": notes},

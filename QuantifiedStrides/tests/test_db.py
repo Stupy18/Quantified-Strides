@@ -14,8 +14,9 @@ class TestDatabaseConnection:
         conn, cur = db
         tables = [
             "users", "workouts", "sleep_sessions", "environment_data",
-            "daily_subjective", "workout_metrics", "strength_sessions",
+            "workout_metrics", "strength_sessions",
             "strength_exercises", "strength_sets",
+            "workout_hr_zones", "workout_run_biomechanics", "workout_power_summary",
         ]
         for table in tables:
             cur.execute(
@@ -33,7 +34,7 @@ class TestDatabaseConnection:
         cols = {row[0] for row in cur.fetchall()}
         required = {
             "workout_id", "user_id", "sport", "start_time", "end_time",
-            "calories_burned", "avg_heart_rate", "training_volume",
+            "calories_burned", "avg_heart_rate", "distance_m",
             "start_latitude", "start_longitude", "workout_date",
         }
         assert required <= cols
@@ -89,18 +90,6 @@ class TestDatabaseConnection:
         with pytest.raises(psycopg2.errors.UniqueViolation):
             cur.execute(
                 "INSERT INTO sleep_sessions (user_id, sleep_date) "
-                "VALUES (1, '2026-01-01')"
-            )
-
-    def test_unique_constraint_daily_subjective(self, db):
-        conn, cur = db
-        cur.execute(
-            "INSERT INTO daily_subjective (user_id, entry_date) "
-            "VALUES (1, '2026-01-01')"
-        )
-        with pytest.raises(psycopg2.errors.UniqueViolation):
-            cur.execute(
-                "INSERT INTO daily_subjective (user_id, entry_date) "
                 "VALUES (1, '2026-01-01')"
             )
 

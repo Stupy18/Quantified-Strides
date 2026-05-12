@@ -58,23 +58,21 @@ def jitter(base, pct=0.15):
 # ── 1. SLEEP SESSIONS (90 days) ───────────────────────────────────────────────
 print("Inserting sleep sessions...")
 
-hrv_base = 52.0  # personal HRV baseline
+hrv_base = 52.0
 rhr_base = 48
 
 for i in range(90):
     d = START + timedelta(days=i)
 
-    # Slowly drift HRV with noise — simulates real training response
     hrv_base += random.uniform(-1.5, 1.5)
     hrv_base  = max(38, min(70, hrv_base))
     overnight_hrv = round(jitter(hrv_base, 0.1), 1)
 
-    rhr = randi(rhr_base - 3, rhr_base + 5)
-    duration = randi(360, 510)  # 6–8.5h in minutes
-    deep  = randi(60, 110)
-    light = randi(140, 220)
-    rem   = randi(80, 130)
-    awake = randi(10, 40)
+    rhr      = randi(rhr_base - 3, rhr_base + 5)
+    deep     = randi(60, 110)
+    light    = randi(140, 220)
+    rem      = randi(80, 130)
+    awake    = randi(10, 40)
     duration = deep + light + rem + awake
 
     score = min(99, max(40, int(
@@ -91,13 +89,9 @@ for i in range(90):
         else "HIGH"
     )
 
-    feedbacks = [
-        "POSITIVE_RECOVERING", "POSITIVE_RESTORATIVE",
-        "NEUTRAL_BALANCED", "NEGATIVE_POOR_SLEEP",
-        "POSITIVE_TRAINING_ADAPTED",
-    ]
     feedback = random.choices(
-        feedbacks,
+        ["POSITIVE_RECOVERING", "POSITIVE_RESTORATIVE",
+         "NEUTRAL_BALANCED", "NEGATIVE_POOR_SLEEP", "POSITIVE_TRAINING_ADAPTED"],
         weights=[30, 25, 25, 10, 10]
     )[0]
 
@@ -121,33 +115,33 @@ for i in range(90):
     ))
 
 conn.commit()
-print(f"  ✓ {90} sleep sessions")
+print(f"  ✓ 90 sleep sessions")
 
 # ── 2. WORKOUTS (3–5x/week) ───────────────────────────────────────────────────
 print("Inserting workouts...")
 
 SPORTS = [
-    ("trail_running",   "Trail Run",        90, 140, 600, 900,  True),
-    ("cycling",         "Z2 Bike",          80, 130, 3600, 7200, True),
-    ("mountain_biking", "XC MTB",           100, 155, 3600, 5400, True),
-    ("bouldering",      "Bouldering",       100, 150, 4800, 7200, False),
-    ("running",         "Easy Run",         75,  130, 1800, 3600, True),
-    ("hiking",          "Hike",             80,  130, 5400, 10800, True),
-    ("indoor_cycling",  "Trainer Ride",     85,  140, 3600, 5400, True),
+    ("trail_running",   "Trail Run",     90,  140, 600,   900,   True),
+    ("cycling",         "Z2 Bike",       80,  130, 3600,  7200,  True),
+    ("mountain_biking", "XC MTB",        100, 155, 3600,  5400,  True),
+    ("bouldering",      "Bouldering",    100, 150, 4800,  7200,  False),
+    ("running",         "Easy Run",      75,  130, 1800,  3600,  True),
+    ("hiking",          "Hike",          80,  130, 5400,  10800, True),
+    ("indoor_cycling",  "Trainer Ride",  85,  140, 3600,  5400,  True),
 ]
 
-workout_ids = {}  # date → workout_id (for linking env data + reflections)
+POWER_SPORTS = {"cycling", "mountain_biking", "indoor_cycling"}
 
-# Generate a training schedule — ~4 days on, 1 rest, weighted by sport
+workout_ids = {}  # date → workout_id
+
 training_days = []
 d = START
 while d <= TODAY:
-    # Skip ~25% of days as rest days — cluster rest days realistically
     if random.random() > 0.28:
         training_days.append(d)
     d += timedelta(days=1)
 
-# Remove consecutive 4+ day blocks occasionally for realism
+# Avoid 4+ consecutive days too often
 filtered = []
 streak = 0
 for d in training_days:
@@ -168,8 +162,8 @@ for d in training_days:
     duration   = randi(dur_lo, dur_hi)
     end_dt     = start_dt + timedelta(seconds=duration)
 
-    avg_hr  = randi(hr_lo, hr_hi)
-    max_hr  = min(195, avg_hr + randi(15, 30))
+    avg_hr = randi(hr_lo, hr_hi)
+    max_hr = min(195, avg_hr + randi(15, 30))
     z1 = int(duration * randf(0.05, 0.15))
     z2 = int(duration * randf(0.30, 0.50))
     z3 = int(duration * randf(0.15, 0.30))
@@ -190,27 +184,21 @@ for d in training_days:
         INSERT INTO workouts (
             user_id, sport, start_time, end_time, workout_type,
             calories_burned, avg_heart_rate, max_heart_rate,
-            time_in_hr_zone_1, time_in_hr_zone_2, time_in_hr_zone_3,
-            time_in_hr_zone_4, time_in_hr_zone_5,
-            training_volume, workout_date,
-            training_stress_score,
+            distance_m, workout_date,
             elevation_gain, elevation_loss,
             aerobic_training_effect, anaerobic_training_effect,
             start_latitude, start_longitude, location
         ) VALUES (
             %s,%s,%s,%s,%s,
             %s,%s,%s,
-            %s,%s,%s,%s,%s,
-            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+            %s,%s,%s,%s,%s,%s,%s,%s,%s
         )
         ON CONFLICT (user_id, start_time) DO NOTHING
         RETURNING workout_id
     """, (
         USER_ID, sport, start_dt, end_dt, wtype,
         randi(300, 900), avg_hr, max_hr,
-        z1, z2, z3, z4, z5,
         distance, d,
-        tss,
         randf(100, 800) if has_gps else None,
         randf(80, 750)  if has_gps else None,
         randf(2.5, 4.5), randf(0.5, 2.5),
@@ -219,8 +207,33 @@ for d in training_days:
         "Cluj-Napoca" if has_gps else None,
     ))
     result = cur.fetchone()
-    if result:
-        workout_ids[d] = result[0]
+    if not result:
+        continue
+    wid = result[0]
+    workout_ids[d] = wid
+
+    # HR zones → satellite table
+    for zone, seconds in enumerate([z1, z2, z3, z4, z5], start=1):
+        cur.execute("""
+            INSERT INTO workout_hr_zones (workout_id, zone, seconds)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (workout_id, zone) DO UPDATE SET seconds = EXCLUDED.seconds
+        """, (wid, zone, seconds))
+
+    # Power/TSS → satellite table (all sports get a TSS; power meters only for cycling)
+    np = round(randf(150, 280), 1) if sport in POWER_SPORTS else None
+    cur.execute("""
+        INSERT INTO workout_power_summary (
+            workout_id, normalized_power, avg_power, max_power, training_stress_score
+        ) VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (workout_id) DO NOTHING
+    """, (
+        wid,
+        np,
+        round(np * 0.92, 1) if np else None,
+        round(np * 1.15, 1) if np else None,
+        tss,
+    ))
 
 conn.commit()
 print(f"  ✓ {len(workout_ids)} workouts")
@@ -229,25 +242,24 @@ print(f"  ✓ {len(workout_ids)} workouts")
 print("Inserting strength sessions...")
 
 UPPER_EXERCISES = [
-    ("Pull-up",             [3, 4], [6, 10],  None, False),
-    ("Bench Press",         [3, 4], [5, 8],   80.0, False),
-    ("Barbell Row",         [3, 4], [6, 8],   70.0, False),
-    ("Overhead Press",      [3, 4], [5, 8],   50.0, False),
-    ("Dumbbell Curl",       [2, 3], [8, 12],  15.0, True),
-    ("Tricep Pushdown",     [2, 3], [10, 15], None, False),
-    ("Face Pull",           [3, 3], [12, 15], None, False),
+    ("Pull-up",              [3, 4], [6, 10],  None,  False),
+    ("Bench Press",          [3, 4], [5, 8],   80.0,  False),
+    ("Barbell Row",          [3, 4], [6, 8],   70.0,  False),
+    ("Overhead Press",       [3, 4], [5, 8],   50.0,  False),
+    ("Dumbbell Curl",        [2, 3], [8, 12],  15.0,  True),
+    ("Tricep Pushdown",      [2, 3], [10, 15], None,  False),
+    ("Face Pull",            [3, 3], [12, 15], None,  False),
 ]
 LOWER_EXERCISES = [
-    ("Squat",               [4, 4], [5, 8],   100.0, False),
-    ("Romanian Deadlift",   [3, 4], [8, 10],  80.0,  False),
-    ("Bulgarian Split Squat",[3,3], [8, 10],  20.0,  True),
-    ("Leg Press",           [3, 3], [10, 12], None,  False),
-    ("Calf Raise",          [3, 3], [15, 20], None,  False),
-    ("Hip Thrust",          [3, 3], [10, 12], 80.0,  False),
+    ("Squat",                [4, 4], [5, 8],   100.0, False),
+    ("Romanian Deadlift",    [3, 4], [8, 10],  80.0,  False),
+    ("Bulgarian Split Squat",[3, 3], [8, 10],  20.0,  True),
+    ("Leg Press",            [3, 3], [10, 12], None,  False),
+    ("Calf Raise",           [3, 3], [15, 20], None,  False),
+    ("Hip Thrust",           [3, 3], [10, 12], 80.0,  False),
 ]
 
-# Pick ~2x/week gym days that don't already have a workout
-all_days = [START + timedelta(days=i) for i in range(90)]
+all_days  = [START + timedelta(days=i) for i in range(90)]
 available = [d for d in all_days if d not in workout_ids]
 gym_days  = sorted(random.sample(available, min(24, len(available))))
 
@@ -271,18 +283,21 @@ for d in gym_days:
     chosen    = random.sample(exercises, min(5, len(exercises)))
 
     for order, (name, set_range, rep_range, base_weight, per_hand) in enumerate(chosen, 1):
+        # Populate exercise_ref_id via name match against the exercises table
         cur.execute("""
-            INSERT INTO strength_exercises (session_id, exercise_order, name)
-            VALUES (%s, %s, %s)
+            INSERT INTO strength_exercises (session_id, exercise_order, name, exercise_ref_id)
+            VALUES (
+                %s, %s, %s,
+                (SELECT exercise_id FROM exercises WHERE LOWER(name) = LOWER(%s) LIMIT 1)
+            )
             RETURNING exercise_id
-        """, (session_id, order, name))
+        """, (session_id, order, name, name))
         ex_id  = cur.fetchone()[0]
         n_sets = randi(*set_range)
 
         for s in range(1, n_sets + 1):
             reps = randi(*rep_range)
             if base_weight:
-                # Progressive overload — small week-over-week increase
                 week   = (d - START).days // 7
                 weight = round(base_weight + week * randf(0, 1.25), 2)
                 total  = weight * 2 if per_hand else weight
@@ -307,11 +322,9 @@ print("Inserting daily readiness...")
 
 for i in range(90):
     d = START + timedelta(days=i)
-    yesterday = d - timedelta(days=1)
-    trained_yesterday = yesterday in workout_ids
-
-    # Legs feel worse after leg-heavy days
+    trained_yesterday = (d - timedelta(days=1)) in workout_ids
     legs_base = 6 if trained_yesterday else 8
+
     cur.execute("""
         INSERT INTO daily_readiness (
             user_id, entry_date,
@@ -338,11 +351,11 @@ print("Inserting workout reflections...")
 for d, wid in workout_ids.items():
     cur.execute("""
         INSERT INTO workout_reflection (
-            user_id, entry_date, session_rpe, session_quality, load_feel, notes
-        ) VALUES (%s,%s,%s,%s,%s,%s)
+            user_id, entry_date, workout_id, session_rpe, session_quality, load_feel, notes
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (user_id, entry_date) DO NOTHING
     """, (
-        USER_ID, d,
+        USER_ID, d, wid,
         randi(5, 9),
         randi(6, 10),
         random.choice([-1, 0, 0, 0, 1]),
@@ -361,7 +374,7 @@ print(f"  ✓ {len(workout_ids)} reflections")
 # ── 6. ENVIRONMENT DATA ───────────────────────────────────────────────────────
 print("Inserting environment data...")
 
-for d, wid in list(workout_ids.items())[:60]:  # last 60 workouts
+for d, wid in list(workout_ids.items())[:60]:
     cur.execute("""
         INSERT INTO environment_data (
             workout_id, record_datetime, location,

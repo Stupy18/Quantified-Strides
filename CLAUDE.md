@@ -14,7 +14,9 @@ Vlad defines vision and direction. Claude handles implementation and consults on
 |---|---|
 | Backend | FastAPI + SQLAlchemy async (asyncpg driver) |
 | Database | PostgreSQL (`quantifiedstrides`) via Docker (`pgvector/pgvector:pg16`) |
+| Migrations | Flyway 10 (`flyway/flyway:10` Docker service) — SQL-first versioned migrations in `db/flyway/` |
 | Frontend | React (Vite, port 5173) + shadcn/ui components |
+| Mobile | React Native / Expo SDK 54 + Expo Router 6 (`mobile/mobile/`) |
 | Auth | JWT (HS256, 30-day expiry) + email verification via SMTP |
 | Narrative | Anthropic Claude API (`ai/narrative.py`) |
 | RAG | pgvector extension + `ai/rag.py` |
@@ -42,6 +44,8 @@ To reset the database completely:
 ```bash
 docker compose down -v && docker compose up -d
 ```
+
+Schema is managed by **Flyway** — the `flyway` service runs on every `docker compose up`, applies any pending migrations from `db/flyway/`, then exits. Backend and seed wait on `flyway: condition: service_completed_successfully` before starting.
 
 ### Local Dev (hot-reload — BE + FE only, DB still via Docker)
 
@@ -91,7 +95,8 @@ api/v1/
 repos/                # repository layer — all SQL lives here, injected via FastAPI Depends
   user_repo.py             # users + user_profile queries
   workout_repo.py          # workouts table queries + intelligence helpers
-  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain)
+  workout_metrics_repo.py  # workout_metrics time-series queries (biomechanics, running economy, terrain,
+                           #   grade-adjusted pace/speed, performance condition, speed_ms series)
   strength_repo.py         # strength_sessions, strength_exercises, strength_sets, exercises queries
   sleep_repo.py            # sleep_sessions queries
   checkin_repo.py          # daily_readiness, workout_reflection, journal_entries queries
@@ -141,7 +146,8 @@ intelligence/
 ingestion/
   okgarmin_connection.py  # shared singleton Garmin client; token-cached at ~/.garmin_tokens
                           # get_garmin_client() / reset_garmin_client() — used by all ingestion fns
-  workout.py            # collect_workout_data(db, user_id, client) → workouts table
+  workout.py            # collect_workout_data(db, user_id, client) → workouts + satellite tables
+                        #   (workout_hr_zones, workout_run_biomechanics, workout_power_summary)
   sleep.py              # collect_sleep_data(db, user_id, client) → sleep_sessions table
   environment.py        # collect_environment_data(db) → environment_data table
                         # WARNING: hardcoded user_id=1 — not yet multi-user
@@ -156,7 +162,7 @@ All ingestion functions are async and accept an injected Garmin client. Primary 
 cli/
   main.py               # CLI entry point
   checkin.py            # morning readiness + post-workout reflection (terminal)
-  daily_subjective.py   # daily subjective input CLI
+  daily_subjective.py   # DEPRECATED — backing table (daily_subjective) was dropped; kept for reference only
   strength_log.py       # gym session logger (superseded by API, kept for terminal use)
 ```
 
@@ -166,15 +172,24 @@ cli/
 db/
   session.py            # psycopg2 get_connection() — used only by cli/ and scripts/
                         # NOTE: also defines a stale async engine; canonical async engine lives in deps.py
-  schema.sql            # canonical PostgreSQL schema
+  schema.sql            # reference snapshot only — NOT mounted into the db container
+  flyway/
+    V001__baseline.sql  # frozen initial schema (do not edit)
+    V002__*.sql         # future migrations go here — never edit committed files
 ```
+
+**Migration rules:**
+- Flyway owns all schema changes. Never edit a committed migration file — add a new version instead.
+- Naming: `V{version}__{description}.sql` (double underscore). Version is an integer: `V002`, `V003`, etc.
+- `flyway_schema_history` table is created automatically in the DB — do not touch it.
+- `BASELINE_ON_MIGRATE=true` means: fresh DB runs V001 to create the schema; existing DB with no history table gets V001 marked as already applied, then any pending versions run.
 
 ### One-Off Scripts — `scripts/`
 
 ```
 scripts/
   check_connections.py        # smoke test: verifies PostgreSQL, Garmin, OpenWeather, pollen APIs
-  backfill_workouts.py        # one-time: backfilled historical Garmin workouts
+  backfill_workouts.py        # one-time: backfilled historical Garmin workouts (writes to satellite tables)
   backfill_sleep.py           # one-time: backfilled historical sleep data
   backfill_workout_metrics.py # one-time: backfilled workout_metrics time-series
   ingest_knowledge.py         # one-time: embed coaching transcripts into pgvector
@@ -184,6 +199,7 @@ scripts/
   populate_tables.py          # seed 90 days of demo data (workouts, sleep, readiness, reflections)
   populate_tables2.py         # seed exercises, workout_metrics, strength sessions
   seed_docker.sh              # Docker entrypoint for seed service — polls for user then runs both populate scripts
+                              # NOTE: entrypoint uses `tr -d '\r'` to strip Windows CRLF before execution
   dump_tables.py              # dump table contents for inspection
   debug_sleep.py              # sleep data debug utility
 ```
@@ -271,16 +287,32 @@ nginx.conf              # serves React SPA on port 80, proxies /api/ to backend:
 ```
 users                      (email_verified BOOLEAN, verification_token — proper auth columns)
   └─ user_profile          (FK: user_id — goal, gym_days_week, primary_sports JSONB)
-  └─ workouts              (FK: user_id — sport, HR zones, VO2max, biomechanics, GPS)
-       ├─ environment_data (FK: workout_id nullable — weather, UV, pollen per session)
-       └─ workout_metrics  (FK: workout_id — time-series HR, pace, cadence, power; seeded)
+  └─ workouts              (FK: user_id — sport, distance_m, avg_cadence, VO2max, GPS,
+                                          garmin_activity_id, primary_benefit, training_load_score,
+                                          avg/max_respiration_rate; core fields only — zones/bio/power
+                                          in satellite tables)
+       ├─ workout_hr_zones        (FK: workout_id — zone SMALLINT + seconds; PRIMARY KEY (workout_id, zone))
+       ├─ workout_run_biomechanics(FK: workout_id PK — avg_vertical_oscillation, avg_stance_time,
+                                                        avg_stride_length, avg_vertical_ratio,
+                                                        avg_running_cadence, max_running_cadence)
+       ├─ workout_power_summary   (FK: workout_id PK — normalized_power, avg_power, max_power,
+                                                        training_stress_score)
+       ├─ environment_data        (FK: workout_id nullable — weather, UV, pollen per session;
+                                                        record_date DATE GENERATED from record_datetime)
+       └─ workout_metrics         (FK: workout_id — time-series: heart_rate, pace, cadence,
+                                                        vertical_oscillation, vertical_ratio, stance_time,
+                                                        power, lat/lon, altitude, distance, gradient_pct,
+                                                        stride_length, grade_adjusted_pace, body_battery,
+                                                        vertical_speed, speed_ms, grade_adjusted_speed_ms,
+                                                        performance_condition, respiration_rate;
+                                                        UNIQUE (workout_id, metric_timestamp); seeded)
   └─ sleep_sessions        (FK: user_id — duration, score, HRV, stages, Body Battery)
   └─ daily_readiness       (FK: user_id — overall/legs/upper/joint feel, time_available,
                                           going_out_tonight)
-  └─ workout_reflection    (FK: user_id — session RPE, quality, load_feel, notes)
-  └─ daily_subjective      (FK: user_id — mood, energy, stress, notes)
+  └─ workout_reflection    (FK: user_id — session RPE, quality, load_feel, notes,
+                                          workout_id FK → workouts ON DELETE SET NULL)
   └─ strength_sessions     (FK: user_id; seeded with strength training workouts)
-       └─ strength_exercises (FK: session_id)
+       └─ strength_exercises (FK: session_id; exercise_ref_id FK → exercises ON DELETE SET NULL)
             └─ strength_sets (FK: exercise_id — weight, reps, rpe)
   └─ narrative_cache       (FK: user_id — date + cache_key UNIQUE; busts on sport change)
   └─ nutrition_log         (FK: user_id — schema defined, not implemented)
@@ -294,13 +326,22 @@ knowledge_chunks           (pgvector: coaching transcript embeddings for RAG)
 
 **Key schema notes:**
 - `users` has `email_verified` and `verification_token` columns for the email verification flow
-- `environment_data.workout_id` is nullable — NULL means a rest day (no placeholder workouts)
 - `workouts` has `UNIQUE (user_id, start_time)` — duplicate detection on ingest
+- `workouts.distance_m` stores metres of distance (renamed from the ambiguous `training_volume`)
+- `workouts.avg_cadence` stores session-level cadence for all sports (running: steps/min; cycling: rpm)
+- HR zones are normalised into `workout_hr_zones` — supports 3–6 zone configs; TRIMP reads from here
+- Running biomechanics (GCT, oscillation, stride) are in `workout_run_biomechanics`; column is `avg_stance_time` (Garmin fit-file name) not `avg_ground_contact_time`
+- `workout_metrics.stance_time` matches the Garmin fit-file field name (`directGroundContactTime` maps to `stance_time`)
+- `environment_data.workout_id` is nullable — NULL means a rest day (no placeholder workouts)
+- `environment_data.record_date` is a `GENERATED ALWAYS AS (record_datetime::date) STORED` column — use it in WHERE clauses instead of casting
 - `daily_readiness` captures `going_out_tonight` (social schedule affects tomorrow's training)
-- `workout_reflection.load_feel` is a -2 to +2 scale (too easy → too hard) — used to calibrate future recommendations
+- `workout_reflection.load_feel` is a -2 to +2 scale (too easy → too hard) — used to calibrate future recommendations; `workout_id` FK links the reflection to the specific workout
+- `strength_exercises.exercise_ref_id` FK links logged exercises to the `exercises` taxonomy — auto-populated on insert via case-insensitive name match
 - `user_profile.primary_sports` is JSONB — keys are sport slugs, values are priority weights
 - `narrative_cache` is keyed by `(user_id, date, cache_key)` — cache_key is an MD5 of sports preferences; busts when sport profile changes
+- `workouts.garmin_activity_id` has a partial UNIQUE index (`WHERE garmin_activity_id IS NOT NULL`); `primary_benefit` and `training_load_score` are Garmin-sourced training adaptation metadata; `avg/max_respiration_rate` are session summaries
 - `workout_metrics`, `exercises`, and `strength_sessions` are seeded with real data
+- `daily_subjective` table was dropped (superseded by `daily_readiness`)
 
 ## Intelligence Layer — How It Works
 
@@ -408,6 +449,7 @@ External API keys (OpenWeatherMap, Ambee) are fetched per-user from `user_profil
 - **workout_metrics live ingestion** — `ingestion/workout_metrics.py` exists and backfill is done; `collect_workout_metrics()` is called from sync but integration may not be fully tested end-to-end
 - **`environment.py` not multi-user** — `collect_environment_data()` hardcodes `user_id=1`; needs to accept `user_id` as a parameter like the other ingestion functions.
 - **`db/session.py` stale async engine** — defines a second `create_async_engine` instance alongside the canonical one in `deps.py`; ingestion files use the `db/session` one. Should be consolidated so there is a single engine/pool.
+- **Mobile app** (`mobile/mobile/`) — scaffold, theme, component library, and navigation shell built; Load tab fully implemented with real API data (ATL/CTL/TSB SVG chart, ramp rate, workout history list); `BodyFreshnessMap` complete with camera-zoom, per-muscle freshness coloring, and anatomical detail shapes; remaining tabs (Today, Log, History, Me) are placeholder stubs; bundle compiles but **renders a white screen** in Expo Go (runtime issue, unresolved). See `mobile/CLAUDE.md` → "Known Issue" section for diagnosis notes and debug steps.
 
 ## What Doesn't Exist Yet
 

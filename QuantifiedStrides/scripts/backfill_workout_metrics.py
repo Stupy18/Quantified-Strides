@@ -30,19 +30,28 @@ SUPPORTED_SPORTS = {
 
 # Maps Garmin metric descriptor keys to workout_metrics column names.
 GARMIN_KEY_TO_COLUMN = {
-    "directHeartRate":           "heart_rate",
-    "directSpeed":               "pace",               # converted m/s → min/km
-    "directDoubleCadence":       "cadence",
-    "directCadence":             "cadence",
-    "directVerticalOscillation": "vertical_oscillation",
-    "directVerticalRatio":       "vertical_ratio",
-    "directGroundContactTime":   "ground_contact_time",
-    "directPower":               "power",
-    "directLatitude":            "latitude",
-    "directLongitude":           "longitude",
-    "directAltitude":            "altitude",
-    "directElevation":           "altitude",           # some devices use this key
-    "directDistance":            "distance",
+    "directHeartRate":              "heart_rate",
+    "directSpeed":                  "pace",               # m/s → min/km; speed_ms added separately
+    "directDoubleCadence":          "cadence",
+    "directCadence":                "cadence",
+    "directVerticalOscillation":    "vertical_oscillation",
+    "directVerticalRatio":          "vertical_ratio",
+    "directGroundContactTime":      "stance_time",
+    "directPower":                  "power",
+    "directLatitude":               "latitude",
+    "directLongitude":              "longitude",
+    "directAltitude":               "altitude",
+    "directElevation":              "altitude",           # some devices use this key
+    "directDistance":               "distance",
+    # T1-E
+    "directStrideLength":           "stride_length",
+    "directGradeAdjustedSpeed":     "grade_adjusted_pace",# m/s → min/km; grade_adjusted_speed_ms added separately
+    "directBodyBattery":            "body_battery",
+    "directVerticalSpeed":          "vertical_speed",
+    # T4-A
+    "directPerformanceCondition":   "performance_condition",
+    # T4-B
+    "directRespirationRate":        "respiration_rate",
 }
 
 
@@ -55,15 +64,18 @@ def speed_to_pace(speed_ms):
 
 def build_column_map(descriptors):
     """
-    Return a dict of {metricsIndex: (column_name, transform_fn)} from the
+    Return a dict of {metricsIndex: [(column_name, transform_fn), ...]} from the
     activity's metricDescriptors list.
 
     When both directCadence and directDoubleCadence are present, only
     directDoubleCadence is mapped (it's the full steps/min value).
+
+    directSpeed and directGradeAdjustedSpeed each produce TWO entries — the
+    converted pace (min/km) and the raw speed_ms float.
     """
     has_double_cadence = any(d["key"] == "directDoubleCadence" for d in descriptors)
 
-    col_map = {}
+    col_map: dict = {}
     for d in descriptors:
         key = d["key"]
         idx = d["metricsIndex"]
@@ -78,12 +90,21 @@ def build_column_map(descriptors):
 
         if col_name == "heart_rate":
             transform = lambda v: int(v) if v is not None else None
-        elif col_name == "pace":
+        elif col_name in ("pace", "grade_adjusted_pace"):
             transform = speed_to_pace
+        elif col_name == "performance_condition":
+            transform = lambda v: int(v) if v is not None else None
         else:
             transform = lambda v: float(v) if v is not None else None
 
-        col_map[idx] = (col_name, transform)
+        if idx not in col_map:
+            col_map[idx] = []
+        col_map[idx].append((col_name, transform))
+
+        if key == "directSpeed":
+            col_map[idx].append(("speed_ms", lambda v: float(v) if v is not None else None))
+        elif key == "directGradeAdjustedSpeed":
+            col_map[idx].append(("grade_adjusted_speed_ms", lambda v: float(v) if v is not None else None))
 
     return col_map
 
@@ -105,6 +126,10 @@ def extract_workout_fields(activity):
     end_time_dt = start_time_dt + timedelta(seconds=float(duration_seconds))
     workout_date = start_time_dt.date()
 
+    avg_cadence = (
+        activity.get("averageRunningCadenceInStepsPerMinute")
+        or activity.get("averageBikingCadenceInRevPerMinute")
+    )
     return dict(
         user_id=1,
         sport=activity.get("activityType", {}).get("typeKey", "Unknown"),
@@ -116,18 +141,8 @@ def extract_workout_fields(activity):
         max_heart_rate=activity.get("maxHR", 0),
         vo2max=activity.get("vO2MaxValue", None),
         lactate_threshold=activity.get("lactateThresholdBpm", None),
-        time_in_zone_1=activity.get("hrTimeInZone_1", 0.0),
-        time_in_zone_2=activity.get("hrTimeInZone_2", 0.0),
-        time_in_zone_3=activity.get("hrTimeInZone_3", 0.0),
-        time_in_zone_4=activity.get("hrTimeInZone_4", 0.0),
-        time_in_zone_5=activity.get("hrTimeInZone_5", 0.0),
-        training_volume=activity.get("distance", 0.0),
-        avg_vertical_osc=activity.get("avgVerticalOscillation", None),
-        avg_ground_contact=activity.get("avgGroundContactTime", None),
-        avg_stride_length=activity.get("avgStrideLength", None),
-        avg_vertical_ratio=activity.get("avgVerticalRatio", None),
-        avg_running_cadence=activity.get("averageRunningCadenceInStepsPerMinute", None),
-        max_running_cadence=activity.get("maxRunningCadenceInStepsPerMinute", None),
+        distance_m=activity.get("distance", 0.0),
+        avg_cadence=avg_cadence,
         location=activity.get("locationName", "Unknown"),
         start_latitude=activity.get("startLatitude"),
         start_longitude=activity.get("startLongitude"),
@@ -136,11 +151,29 @@ def extract_workout_fields(activity):
         elevation_loss=activity.get("elevationLoss", None),
         aerobic_training_effect=activity.get("aerobicTrainingEffect", None),
         anaerobic_training_effect=activity.get("anaerobicTrainingEffect", None),
-        training_stress_score=activity.get("trainingStressScore", None),
-        normalized_power=activity.get("normalizedPower", None),
-        avg_power=activity.get("avgPower", None),
-        max_power=activity.get("maxPower", None),
+        garmin_activity_id=activity.get("activityId"),
+        primary_benefit=activity.get("primaryBenefit"),
+        training_load_score=activity.get("activityTrainingLoad"),
+        avg_respiration_rate=activity.get("avgRespirationRate"),
+        max_respiration_rate=activity.get("maxRespirationRate"),
         total_steps=activity.get("steps", None),
+        # satellite table fields (returned separately for insertion)
+        _hr_zones={i: int(float(v)) for i in range(1,6)
+                   if (v := activity.get(f"hrTimeInZone_{i}")) is not None},
+        _bio=dict(
+            avg_vertical_oscillation=activity.get("avgVerticalOscillation"),
+            avg_stance_time=activity.get("avgGroundContactTime"),
+            avg_stride_length=activity.get("avgStrideLength"),
+            avg_vertical_ratio=activity.get("avgVerticalRatio"),
+            avg_running_cadence=activity.get("averageRunningCadenceInStepsPerMinute"),
+            max_running_cadence=activity.get("maxRunningCadenceInStepsPerMinute"),
+        ),
+        _power=dict(
+            normalized_power=activity.get("normalizedPower"),
+            avg_power=activity.get("avgPower"),
+            max_power=activity.get("maxPower"),
+            training_stress_score=activity.get("trainingStressScore"),
+        ),
     )
 
 
@@ -149,55 +182,51 @@ INSERT INTO workouts (
       user_id, sport, start_time, end_time, workout_type
     , calories_burned, avg_heart_rate, max_heart_rate
     , vo2max_estimate, lactate_threshold_bpm
-    , time_in_hr_zone_1, time_in_hr_zone_2, time_in_hr_zone_3
-    , time_in_hr_zone_4, time_in_hr_zone_5
-    , training_volume
-    , avg_vertical_oscillation, avg_ground_contact_time
-    , avg_stride_length, avg_vertical_ratio
-    , avg_running_cadence, max_running_cadence
+    , distance_m, avg_cadence
     , location, start_latitude, start_longitude, workout_date
     , elevation_gain, elevation_loss
     , aerobic_training_effect, anaerobic_training_effect
-    , training_stress_score, normalized_power
-    , avg_power, max_power, total_steps
+    , total_steps, garmin_activity_id
+    , primary_benefit, training_load_score
+    , avg_respiration_rate, max_respiration_rate
 )
 VALUES (
     %(user_id)s, %(sport)s, %(start_time)s, %(end_time)s, %(workout_type)s,
     %(calories_burned)s, %(avg_heart_rate)s, %(max_heart_rate)s,
     %(vo2max)s, %(lactate_threshold)s,
-    %(time_in_zone_1)s, %(time_in_zone_2)s, %(time_in_zone_3)s,
-    %(time_in_zone_4)s, %(time_in_zone_5)s,
-    %(training_volume)s,
-    %(avg_vertical_osc)s, %(avg_ground_contact)s,
-    %(avg_stride_length)s, %(avg_vertical_ratio)s,
-    %(avg_running_cadence)s, %(max_running_cadence)s,
+    %(distance_m)s, %(avg_cadence)s,
     %(location)s, %(start_latitude)s, %(start_longitude)s, %(workout_date)s,
     %(elevation_gain)s, %(elevation_loss)s,
     %(aerobic_training_effect)s, %(anaerobic_training_effect)s,
-    %(training_stress_score)s, %(normalized_power)s,
-    %(avg_power)s, %(max_power)s, %(total_steps)s
+    %(total_steps)s, %(garmin_activity_id)s,
+    %(primary_benefit)s, %(training_load_score)s,
+    %(avg_respiration_rate)s, %(max_respiration_rate)s
 )
 ON CONFLICT (user_id, start_time) DO UPDATE SET
-      elevation_gain             = EXCLUDED.elevation_gain
-    , elevation_loss             = EXCLUDED.elevation_loss
-    , aerobic_training_effect    = EXCLUDED.aerobic_training_effect
-    , anaerobic_training_effect  = EXCLUDED.anaerobic_training_effect
-    , training_stress_score      = EXCLUDED.training_stress_score
-    , normalized_power           = EXCLUDED.normalized_power
-    , avg_power                  = EXCLUDED.avg_power
-    , max_power                  = EXCLUDED.max_power
-    , total_steps                = EXCLUDED.total_steps
+      elevation_gain            = EXCLUDED.elevation_gain
+    , elevation_loss            = EXCLUDED.elevation_loss
+    , aerobic_training_effect   = EXCLUDED.aerobic_training_effect
+    , anaerobic_training_effect = EXCLUDED.anaerobic_training_effect
+    , total_steps               = EXCLUDED.total_steps
+    , garmin_activity_id        = EXCLUDED.garmin_activity_id
+    , training_load_score       = EXCLUDED.training_load_score
 RETURNING workout_id;
 """
+
+_RUNNING_SPORTS_BACKFILL = {"running", "trail_running"}
 
 SQL_INSERT_METRIC = """
 INSERT INTO workout_metrics (
     workout_id, metric_timestamp,
     heart_rate, pace, cadence,
-    vertical_oscillation, vertical_ratio, ground_contact_time, power,
-    latitude, longitude, altitude, distance, gradient_pct
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT DO NOTHING;
+    vertical_oscillation, vertical_ratio, stance_time, power,
+    latitude, longitude, altitude, distance, gradient_pct,
+    stride_length, grade_adjusted_pace, body_battery, vertical_speed,
+    speed_ms, grade_adjusted_speed_ms,
+    performance_condition, respiration_rate
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+          %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (workout_id, metric_timestamp) DO NOTHING;
 """
 
 
@@ -234,17 +263,26 @@ def insert_metric_rows(cursor, workout_id, details):
             "cadence": None,
             "vertical_oscillation": None,
             "vertical_ratio": None,
-            "ground_contact_time": None,
+            "stance_time": None,
             "power": None,
             "latitude": None,
             "longitude": None,
             "altitude": None,
             "distance": None,
+            "stride_length": None,
+            "grade_adjusted_pace": None,
+            "body_battery": None,
+            "vertical_speed": None,
+            "speed_ms": None,
+            "grade_adjusted_speed_ms": None,
+            "performance_condition": None,
+            "respiration_rate": None,
         }
 
-        for idx, (col_name, transform) in col_map.items():
+        for idx, col_list in col_map.items():
             if idx < len(metrics) and metrics[idx] is not None:
-                values[col_name] = transform(metrics[idx])
+                for col_name, transform in col_list:
+                    values[col_name] = transform(metrics[idx])
 
         # gradient_pct = Δaltitude / Δhorizontal_distance × 100
         # Primary: cumulative distance; fallback: pace × Δt (1s per point)
@@ -275,13 +313,21 @@ def insert_metric_rows(cursor, workout_id, details):
             values["cadence"],
             values["vertical_oscillation"],
             values["vertical_ratio"],
-            values["ground_contact_time"],
+            values["stance_time"],
             values["power"],
             values["latitude"],
             values["longitude"],
             values["altitude"],
             values["distance"],
             gradient_pct,
+            values["stride_length"],
+            values["grade_adjusted_pace"],
+            values["body_battery"],
+            values["vertical_speed"],
+            values["speed_ms"],
+            values["grade_adjusted_speed_ms"],
+            values["performance_condition"],
+            values["respiration_rate"],
         ))
         rows_inserted += 1
 
@@ -388,6 +434,9 @@ def main():
                 if fields is None:
                     print(f"Activity {i}/{len(matching)}: {activity_name} {activity_date} — skipped (could not parse fields)")
                     continue
+                hr_zones  = fields.pop("_hr_zones", {})
+                bio       = fields.pop("_bio", {})
+                power     = fields.pop("_power", {})
                 cursor.execute(SQL_INSERT_WORKOUT, fields)
                 result = cursor.fetchone()
                 if result:
@@ -404,6 +453,59 @@ def main():
                 if workout_id is None:
                     print(f"Activity {i}/{len(matching)}: {activity_name} {activity_date} — skipped (could not get workout_id)")
                     continue
+
+                # HR zones
+                if hr_zones:
+                    cursor.executemany(
+                        "INSERT INTO workout_hr_zones (workout_id, zone, seconds) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (workout_id, zone) DO UPDATE SET seconds = EXCLUDED.seconds",
+                        [(workout_id, z, s) for z, s in hr_zones.items()]
+                    )
+
+                # Running biomechanics
+                if sport in _RUNNING_SPORTS_BACKFILL and any(v is not None for v in bio.values()):
+                    cursor.execute("""
+                        INSERT INTO workout_run_biomechanics (
+                            workout_id, avg_vertical_oscillation, avg_stance_time,
+                            avg_stride_length, avg_vertical_ratio,
+                            avg_running_cadence, max_running_cadence
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (workout_id) DO UPDATE SET
+                            avg_vertical_oscillation = EXCLUDED.avg_vertical_oscillation,
+                            avg_stance_time          = EXCLUDED.avg_stance_time,
+                            avg_stride_length        = EXCLUDED.avg_stride_length,
+                            avg_vertical_ratio       = EXCLUDED.avg_vertical_ratio,
+                            avg_running_cadence      = EXCLUDED.avg_running_cadence,
+                            max_running_cadence      = EXCLUDED.max_running_cadence
+                    """, (
+                        workout_id,
+                        bio["avg_vertical_oscillation"],
+                        bio["avg_stance_time"],
+                        bio["avg_stride_length"],
+                        bio["avg_vertical_ratio"],
+                        bio["avg_running_cadence"],
+                        bio["max_running_cadence"],
+                    ))
+
+                # Power summary
+                if any(v is not None for v in power.values()):
+                    cursor.execute("""
+                        INSERT INTO workout_power_summary (
+                            workout_id, normalized_power, avg_power, max_power, training_stress_score
+                        ) VALUES (%s,%s,%s,%s,%s)
+                        ON CONFLICT (workout_id) DO UPDATE SET
+                            normalized_power      = EXCLUDED.normalized_power,
+                            avg_power             = EXCLUDED.avg_power,
+                            max_power             = EXCLUDED.max_power,
+                            training_stress_score = EXCLUDED.training_stress_score
+                    """, (
+                        workout_id,
+                        power["normalized_power"],
+                        power["avg_power"],
+                        power["max_power"],
+                        power["training_stress_score"],
+                    ))
+
                 conn.commit()
 
             # Check if metrics already populated

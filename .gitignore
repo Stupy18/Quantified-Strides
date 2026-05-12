@@ -5,4 +5,5 @@
 
 frontend/package-lock.json
 
-notebooks/config.py
+
+.env

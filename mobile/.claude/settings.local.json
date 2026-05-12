@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(npm install *)",
+      "Bash(curl -s -L https://github.com/google/fonts/raw/main/ofl/newsreader/Newsreader%5Bopsz%2Cwght%5D.ttf -o C:/Users/stupa/Desktop/QuantifiedStrides-main/mobile/mobile/assets/fonts/Newsreader-Regular.ttf)",
+      "Bash(curl -s -L https://github.com/google/fonts/raw/main/ofl/newsreader/Newsreader-Italic%5Bopsz%2Cwght%5D.ttf -o C:/Users/stupa/Desktop/QuantifiedStrides-main/mobile/mobile/assets/fonts/Newsreader-Italic.ttf)",
+      "Bash(curl -s \"https://api.github.com/repos/vercel/geist-font/contents/packages/geist/src/fonts/geist-sans\")",
+      "Bash(curl -s \"https://api.github.com/repos/vercel/geist-font/contents\")",
+      "Bash(curl -s \"https://api.github.com/repos/vercel/geist-font/git/trees/main?recursive=1\")",
+      "Bash(curl -s -L https://github.com/vercel/geist-font/raw/main/fonts/Geist/ttf/Geist-Regular.ttf -o C:/Users/stupa/Desktop/QuantifiedStrides-main/mobile/mobile/assets/fonts/Geist-Regular.ttf)",
+      "Bash(ipconfig)"
+    ]
+  }
+}

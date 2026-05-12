@@ -29,15 +29,14 @@ _ZONE_WEIGHTS = [1.0, 1.5, 2.0, 3.0, 4.0]   # zones 1-5
 async def _trimp_for_date(workout_repo: WorkoutRepo, strength_repo: StrengthRepo, d, user_id=1):
     """
     Sum HR-zone-weighted training load across all Garmin workouts on date d.
-    time_in_hr_zone_* is stored in seconds.
+    HR zones are stored in workout_hr_zones (zone, seconds) rows.
     Falls back to strength_sessions set-count estimate if no Garmin entry.
     """
     rows = await workout_repo.get_hr_zones_for_date(user_id, d)
     trimp = 0.0
     for row in rows:
-        for i, seconds in enumerate(row):
-            if seconds:
-                trimp += (seconds / 60.0) * _ZONE_WEIGHTS[i]
+        if row.seconds:
+            trimp += (row.seconds / 60.0) * _ZONE_WEIGHTS[row.zone - 1]
 
     if trimp == 0:
         sets  = await strength_repo.get_set_count_for_date(user_id, d)

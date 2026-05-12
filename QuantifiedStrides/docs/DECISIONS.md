@@ -4,6 +4,26 @@ This document records every significant decision made about how the recommendati
 
 ---
 
+## Database Migrations
+
+### Tooling: Flyway (SQL-first, Docker service)
+
+Chosen over Alembic because the codebase uses raw SQL in repos — there are no declarative SQLAlchemy ORM models to auto-generate migrations from. Flyway is SQL-first by design.
+
+Runs as a Docker service (`flyway/flyway:10`) on every `docker compose up`. Backend and seed depend on `flyway: condition: service_completed_successfully`.
+
+Migration files live in `db/flyway/`. Naming: `V{version}__{description}.sql` (double underscore, integer version). `V001__baseline.sql` is the frozen initial schema snapshot.
+
+**Key invariant:** committed migration files are immutable. Flyway checksums each file on every run and refuses to migrate if a previously applied file has changed. All schema changes go in a new version file.
+
+**`BASELINE_ON_MIGRATE=true`** handles the two bootstrap scenarios:
+- Fresh DB (no volume): Flyway runs V001 to create the full schema.
+- Existing DB (volume present, no `flyway_schema_history`): V001 is marked as baseline without re-running; any pending V002+ are applied.
+
+To catch up after a `git pull` that added new migrations: `docker compose up` (or `docker compose run --rm flyway`) applies only the gap.
+
+---
+
 ## Training Load Model
 
 ### Formula: TRIMP (Edwards 5-zone model)

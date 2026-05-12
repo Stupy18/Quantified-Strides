@@ -120,7 +120,7 @@ async def get_yesterdays_training(
             "session_type": meta["category"],
             "sport":        garmin_row.sport,
             "label":        meta["label"],
-            "volume":       garmin_row.training_volume,
+            "volume":       garmin_row.distance_m,
             "avg_hr":       garmin_row.avg_heart_rate,
             "lower_load":   meta["lower_load"],
             "upper_load":   meta["upper_load"],

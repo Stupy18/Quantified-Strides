@@ -76,6 +76,7 @@ class CheckinService:
             "session_quality": payload.session_quality,
             "notes":           payload.notes,
             "load_feel":       payload.load_feel,
+            "workout_id":      payload.workout_id,
         })
         await repo.db.commit()
         return self._map_reflection(row)
@@ -95,6 +96,7 @@ class CheckinService:
             session_quality=row.session_quality,
             notes=row.notes,
             load_feel=row.load_feel,
+            workout_id=getattr(row, "workout_id", None),
         )
 
     # ------------------------------------------------------------------

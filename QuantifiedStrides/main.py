@@ -9,19 +9,41 @@ API docs:
     http://localhost:8000/redoc
 """
 
+import asyncio
 import traceback
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 
 from core.settings import settings
+from db.engine import engine
+import core.cache as cache
 from api.v1 import auth, dashboard, training, sleep, strength, checkin, running, sync
+from ai.rag import _get_model
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    redis_conn = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
+    cache.rd = redis_conn
+
+    # Warm the embedding model now so the first /dashboard request doesn't pay the load cost
+    await asyncio.get_event_loop().run_in_executor(None, _get_model)
+
+    yield
+
+    await redis_conn.aclose()
+    await engine.dispose()
+
 
 app = FastAPI(
     title="QuantifiedStrides API",
     version="1.0.0",
     description="Athlete performance monitoring — training load, recovery, strength, and AI recommendations.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

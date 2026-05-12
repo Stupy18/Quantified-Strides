@@ -10,21 +10,31 @@ from repos.workout_repo import WorkoutRepo
 
 # Maps Garmin metric descriptor keys to workout_metrics column names.
 # directDoubleCadence is the full steps/min figure; directCadence is half-cadence.
-# The script prefers directDoubleCadence when available.
+# Keys that map to TWO columns (directSpeed → pace + speed_ms) are handled by
+# build_column_map returning a list of (col_name, transform) per index.
 GARMIN_KEY_TO_COLUMN = {
-    "directHeartRate":           "heart_rate",
-    "directSpeed":               "pace",               # converted m/s → min/km
-    "directDoubleCadence":       "cadence",
-    "directCadence":             "cadence",
-    "directVerticalOscillation": "vertical_oscillation",
-    "directVerticalRatio":       "vertical_ratio",
-    "directGroundContactTime":   "ground_contact_time",
-    "directPower":               "power",
-    "directLatitude":            "latitude",
-    "directLongitude":           "longitude",
-    "directAltitude":            "altitude",
-    "directElevation":           "altitude",           # some devices use this key
-    "directDistance":            "distance",
+    "directHeartRate":              "heart_rate",
+    "directSpeed":                  "pace",               # m/s → min/km; speed_ms added separately
+    "directDoubleCadence":          "cadence",
+    "directCadence":                "cadence",
+    "directVerticalOscillation":    "vertical_oscillation",
+    "directVerticalRatio":          "vertical_ratio",
+    "directGroundContactTime":      "stance_time",
+    "directPower":                  "power",
+    "directLatitude":               "latitude",
+    "directLongitude":              "longitude",
+    "directAltitude":               "altitude",
+    "directElevation":              "altitude",           # some devices use this key
+    "directDistance":               "distance",
+    # T1-E
+    "directStrideLength":           "stride_length",      # cm, keep unit
+    "directGradeAdjustedSpeed":     "grade_adjusted_pace",# m/s → min/km; grade_adjusted_speed_ms added separately
+    "directBodyBattery":            "body_battery",       # dimensionless 0–100
+    "directVerticalSpeed":          "vertical_speed",     # m/s, store as float
+    # T4-A
+    "directPerformanceCondition":   "performance_condition",  # -20 to +20
+    # T4-B
+    "directRespirationRate":        "respiration_rate",   # breaths/min
 }
 
 
@@ -37,15 +47,18 @@ def speed_to_pace(speed_ms):
 
 def build_column_map(descriptors):
     """
-    Return a dict of {metricsIndex: (column_name, transform_fn)} from the
+    Return a dict of {metricsIndex: [(col_name, transform_fn), ...]} from the
     activity's metricDescriptors list.
 
     When both directCadence and directDoubleCadence are present, only
     directDoubleCadence is mapped (it's the full steps/min value).
+
+    directSpeed and directGradeAdjustedSpeed each produce TWO entries — the
+    converted pace (min/km) and the raw speed_ms float.
     """
     has_double_cadence = any(d["key"] == "directDoubleCadence" for d in descriptors)
 
-    col_map = {}
+    col_map: dict[int, list[tuple]] = {}
     for d in descriptors:
         key = d["key"]
         idx = d["metricsIndex"]
@@ -59,12 +72,22 @@ def build_column_map(descriptors):
 
         if col_name == "heart_rate":
             transform = lambda v: int(v) if v is not None else None
-        elif col_name == "pace":
+        elif col_name in ("pace", "grade_adjusted_pace"):
             transform = speed_to_pace
+        elif col_name == "performance_condition":
+            transform = lambda v: int(v) if v is not None else None
         else:
             transform = lambda v: float(v) if v is not None else None
 
-        col_map[idx] = (col_name, transform)
+        if idx not in col_map:
+            col_map[idx] = []
+        col_map[idx].append((col_name, transform))
+
+        # Also store raw m/s alongside converted pace
+        if key == "directSpeed":
+            col_map[idx].append(("speed_ms", lambda v: float(v) if v is not None else None))
+        elif key == "directGradeAdjustedSpeed":
+            col_map[idx].append(("grade_adjusted_speed_ms", lambda v: float(v) if v is not None else None))
 
     return col_map
 
@@ -77,8 +100,6 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
         except garminconnect.GarminConnectAuthenticationError:  # token expired mid-session
             client = reset_garmin_client()
             activities = client.get_activities(0, 1)
-
-        # 1) Fetch the latest activity from Garmin
 
         if not activities:
             print("No activities found on Garmin Connect.")
@@ -98,7 +119,6 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
 
         workout_date = start_time_dt.date()
 
-        # 2) Find the matching workout_id — exact start time first, fall back to date
         row = await repo.get_by_start_time(user_id, start_time_dt)
         if not row:
             row = await repo.get_by_date(user_id, workout_date)
@@ -109,12 +129,10 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
         workout_id = row.workout_id
         print(f"Matched workout_id: {workout_id}")
 
-        # 3) Skip if metrics already exist for this workout
         if await repo.metrics_exist(workout_id):
             print(f"workout_metrics already populated for workout_id {workout_id}. Skipping.")
             return True
 
-        # 4) Download time-series details from Garmin
         print("Downloading activity details...")
         details = client.get_activity_details(activity_id, maxchart=2000)
 
@@ -134,9 +152,9 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
             return False
 
         col_map = build_column_map(descriptors)
-        print(f"Mapped columns: {sorted(set(col for col, _ in col_map.values()))}")
+        mapped_cols = sorted({col for cols in col_map.values() for col, _ in cols})
+        print(f"Mapped columns: {mapped_cols}")
 
-        # 5) Build rows for batch insert
         rows = []
         prev_altitude = None
         prev_distance = None
@@ -152,14 +170,19 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
             values = {
                 "heart_rate": None, "pace": None, "cadence": None,
                 "vertical_oscillation": None, "vertical_ratio": None,
-                "ground_contact_time": None, "power": None,
+                "stance_time": None, "power": None,
                 "latitude": None, "longitude": None,
                 "altitude": None, "distance": None,
+                "stride_length": None, "grade_adjusted_pace": None,
+                "body_battery": None, "vertical_speed": None,
+                "speed_ms": None, "grade_adjusted_speed_ms": None,
+                "performance_condition": None, "respiration_rate": None,
             }
 
-            for idx, (col_name, transform) in col_map.items():
+            for idx, col_list in col_map.items():
                 if idx < len(metrics) and metrics[idx] is not None:
-                    values[col_name] = transform(metrics[idx])
+                    for col_name, transform in col_list:
+                        values[col_name] = transform(metrics[idx])
 
             # Compute gradient_pct = Δaltitude / Δhorizontal_distance × 100
             gradient_pct = None
@@ -173,8 +196,8 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
                 if dist is not None and prev_distance is not None:
                     d_dist = dist - prev_distance
                 elif pace is not None and pace > 0:
-                    speed_ms = 1000.0 / (pace * 60.0)
-                    d_dist = speed_ms * 1.0   # 1-second intervals
+                    speed_ms_val = 1000.0 / (pace * 60.0)
+                    d_dist = speed_ms_val * 1.0   # 1-second intervals
                 if d_dist is not None and d_dist > 0.5:
                     gradient_pct = round(d_alt / d_dist * 100, 2)
 
@@ -189,16 +212,23 @@ async def collect_workout_metrics(db: AsyncSession, user_id: int, client: garmin
                 values["cadence"],
                 values["vertical_oscillation"],
                 values["vertical_ratio"],
-                values["ground_contact_time"],
+                values["stance_time"],
                 values["power"],
                 values["latitude"],
                 values["longitude"],
                 values["altitude"],
                 values["distance"],
                 gradient_pct,
+                values["stride_length"],
+                values["grade_adjusted_pace"],
+                values["body_battery"],
+                values["vertical_speed"],
+                values["speed_ms"],
+                values["grade_adjusted_speed_ms"],
+                values["performance_condition"],
+                values["respiration_rate"],
             ))
 
-        # 6) Batch insert via repo
         count = await repo.insert_metrics_batch(rows)
         await db.commit()
         print(f"Inserted {count} metric records for workout_id {workout_id}.")
