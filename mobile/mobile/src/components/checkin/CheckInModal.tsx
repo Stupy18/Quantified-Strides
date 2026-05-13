@@ -18,7 +18,7 @@ function getTodayLabel(): string {
   return `${days[now.getDay()]} · ${months[now.getMonth()]} ${now.getDate()}`
 }
 
-type TimeOption = 'short' | 'medium' | 'long'   // all three DB-valid values
+type TimeOption = 'short' | 'medium' | 'full'
 type GoingOut   = 'no' | 'yes'
 
 const INITIAL_SIGNALS = [
@@ -176,7 +176,7 @@ export function CheckInModal() {
               <View style={[styles.chipRow, { marginBottom: SPACE.md }]}>
                 <ToggleChip label="Short"  isSelected={timeAvailable === 'short'}  onPress={() => setTimeAvail('short')}  />
                 <ToggleChip label="Medium" isSelected={timeAvailable === 'medium'} onPress={() => setTimeAvail('medium')} />
-                <ToggleChip label="Long"   isSelected={timeAvailable === 'long'}   onPress={() => setTimeAvail('long')}   />
+                <ToggleChip label="Long"   isSelected={timeAvailable === 'full'}   onPress={() => setTimeAvail('full')}   />
               </View>
 
               <Text style={[TEXT.bodyMedium, { color: theme.textMuted, marginBottom: SPACE.sm }]}>Going out tonight?</Text>

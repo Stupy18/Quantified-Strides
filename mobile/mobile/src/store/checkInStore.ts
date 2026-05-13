@@ -13,7 +13,7 @@ export interface CheckInPayload {
   legs:          number
   upperBody:     number
   joints:        number
-  timeAvailable: 'short' | 'medium' | 'long'
+  timeAvailable: 'short' | 'medium' | 'full'
   goingOut:      boolean
   injuryNotes:   string
 }

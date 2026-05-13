@@ -32,3 +32,27 @@ export async function fetchRecentWorkouts(days = 14): Promise<WorkoutListItem[]>
   const res = await apiClient.get('/training/workouts', { params: { days } })
   return res.data
 }
+
+export interface HRVHistoryPoint {
+  date: string
+  hrv: number
+  baseline: number
+  rhr: number | null
+  sleep_score: number | null
+}
+
+export interface WeeklyVolumePoint {
+  week_start: string
+  training_days: number
+  total_sets: number
+}
+
+export async function fetchHRVHistory(days = 30): Promise<HRVHistoryPoint[]> {
+  const res = await apiClient.get('/training/hrv-history', { params: { days } })
+  return res.data
+}
+
+export async function fetchWeeklyVolume(weeks = 12): Promise<WeeklyVolumePoint[]> {
+  const res = await apiClient.get('/training/weekly-volume', { params: { weeks } })
+  return res.data
+}

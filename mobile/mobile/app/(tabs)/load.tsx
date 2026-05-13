@@ -180,7 +180,7 @@ export default function LoadScreen() {
               </View>
               <View style={styles.metricCol}>
                 <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>FORM</Text>
-                <Text style={[TEXT.displaySmall, { color: tl.tsb >= 0 ? theme.accent : theme.alert }]}>
+                <Text style={[TEXT.displaySmall, { color: tl.tsb >= 0 ? theme.accent : theme.bgAlert }]}>
                   {formatTSB(tl.tsb)}
                 </Text>
                 <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>tsb</Text>
