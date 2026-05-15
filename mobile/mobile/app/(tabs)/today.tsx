@@ -116,7 +116,7 @@ export default function TodayScreen() {
 
   const sleepDuration  = data.sleep?.duration != null ? data.sleep.duration.toFixed(1) : '—'
   const sleepScore     = data.sleep?.score != null ? Math.round(data.sleep.score) : null
-  const sleepUnit      = sleepScore != null ? `h · ${sleepScore}` : 'h'
+  const sleepUnit      = sleepScore != null ? `h · score ${sleepScore}` : 'h'
 
   return (
     <ScreenWrapper style={{ paddingBottom: 0 }} contentContainerStyle={{ paddingBottom: SPACE.lg }}>
