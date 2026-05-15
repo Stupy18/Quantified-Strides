@@ -130,7 +130,7 @@ class StrengthService:
     async def create_session(
         self, repo: StrengthRepo, user_id: int, payload: StrengthSessionCreateSchema
     ) -> StrengthSessionSchema:
-        session_id = await repo.upsert_session(
+        session_id = await repo.insert_session(
             user_id, payload.session_date, payload.session_type, payload.raw_notes
         )
         await repo.delete_exercises(session_id)

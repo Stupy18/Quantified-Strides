@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
-  Modal, View, Text, ScrollView, TextInput,
+  Modal, View, Text, ScrollView, TextInput, Pressable,
   TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform,
   PanResponder, Animated, Easing, ActivityIndicator,
 } from 'react-native'
 import { useCheckInStore } from '../../store/checkInStore'
-import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../hooks/useTheme'
 import { MetricLabel } from '../primitives/MetricLabel'
 import { ToggleChip } from '../primitives/ToggleChip'
@@ -30,7 +29,6 @@ const INITIAL_SIGNALS = [
 
 export function CheckInModal() {
   const theme = useTheme()
-  const { token } = useAuth()
   const { modalVisible, closeModal, submitCheckIn, loading, error } = useCheckInStore()
 
   const [signals, setSignals]         = useState(INITIAL_SIGNALS)
@@ -42,12 +40,11 @@ export function CheckInModal() {
     setSignals(prev => prev.map((s, i) => i === index ? { ...s, score } : s))
 
   async function handleSubmit() {
-    if (!token) return
-    await submitCheckIn(token, {
-      overall:       signals[0].score*2,
-      legs:          signals[1].score*2,
-      upperBody:     signals[2].score*2,
-      joints:        signals[3].score*2,
+    await submitCheckIn({
+      overall:       signals[0].score * 2,
+      legs:          signals[1].score * 2,
+      upperBody:     signals[2].score * 2,
+      joints:        signals[3].score * 2,
       timeAvailable,
       goingOut:      goingOut === 'yes',
       injuryNotes,
@@ -93,7 +90,7 @@ export function CheckInModal() {
       statusBarTranslucent
       onRequestClose={closeModal}
     >
-      <View style={styles.backdrop} />
+      <Pressable style={styles.backdrop} onPress={closeModal} />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

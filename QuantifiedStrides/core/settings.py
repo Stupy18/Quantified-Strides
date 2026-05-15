@@ -34,12 +34,12 @@ class Settings(BaseSettings):
     smtp_from: str = "QuantifiedStrides <noreply@quantifiedstrides.com>"
 
     # JWT
-    jwt_secret: str
+    jwt_secret: str = "dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 30
 
     # Anthropic
-    anthropic_api_key: str
+    anthropic_api_key: str = ""
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

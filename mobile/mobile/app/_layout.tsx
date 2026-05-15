@@ -4,6 +4,7 @@ import { useFonts } from 'expo-font';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '../src/api/queryClient';
 import * as SplashScreen from 'expo-splash-screen';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { ThemeProvider } from '../src/context/ThemeContext';
 import { useCheckInStore } from '../src/store/checkInStore';
@@ -29,22 +30,21 @@ function AuthGate() {
   return null;
 }
 
-// Sits inside AuthProvider so it has access to the token
+// Waits for auth to be resolved, then checks if today's check-in is already done
 function CheckInHydrator() {
   const { token, loading } = useAuth();
   const hydrate = useCheckInStore(s => s.hydrate);
 
   useEffect(() => {
-    // Wait until auth is resolved and we have a token before hitting the backend
     if (loading || !token) return;
-    hydrate(token);
+    hydrate();
   }, [loading, token]);
 
   return null;
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Newsreader:        require('../assets/fonts/Newsreader-Regular.ttf'),
     Newsreader_Italic: require('../assets/fonts/Newsreader-Italic.ttf'),
     JetBrainsMono:     require('../assets/fonts/JetBrainsMono-Regular.ttf'),
@@ -52,23 +52,25 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
+    if (fontsLoaded || fontError) SplashScreen.hideAsync();
+  }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded && !fontError) return null;
 
   return (
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <CheckInHydrator />
-          <AuthGate />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-        </AuthProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <CheckInHydrator />
+            <AuthGate />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+            </Stack>
+          </AuthProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
