@@ -45,7 +45,7 @@ This spec covers the complete recommendation engine, which has two distinct subs
 **Background jobs** (§12) — async tasks invoked by both subsystems.
 **Build order** (§13) — implementation priority across both subsystems.
 
-**Input contract:** `build_recommendation()` expects a signals dict pre-assembled by the caller. Required keys: `acwr`, `hrv_status`, `sleep_readiness`, `readiness_scores`, `ctl`, `tsb`, `atl`, `ramp_rate`, `days_to_competition`, `competition_priority`, `muscle_freshness`, `biomechanics_fatigue_index`, `zone_speeds`, `hr_rpe_status`, `cycle_phase`, `hormonal_contraception`, `training_status`, `goal`, `sex`, `has_readiness_checkin`, `hrv_data_days`, `max_hr_source`, `biomechanics_baseline`, `has_zone_speeds`. All nullable per §3.1. Missing key = `None`; caller must not omit keys. Signal assembly is tested independently of recommendation logic.
+**Input contract:** `build_recommendation()` expects a signals dict pre-assembled by the caller. Required keys: `acwr`, `hrv_status`, `sleep_readiness`, `readiness_scores`, `ctl`, `tsb`, `atl`, `ramp_rate`, `days_to_competition`, `competition_priority`, `muscle_freshness`, `biomechanics_fatigue_index`, `zone_speeds`, `hr_rpe_status`, `cycle_phase`, `hormonal_contraception`, `training_status`, `goal`, `sex`, `has_readiness_checkin`, `hrv_data_days`, `max_hr_source`, `biomechanics_baseline`, `has_zone_speeds`, `strength_goal`, `goal_weights`. All nullable per §3.1. Missing key = `None`; caller must not omit keys. `strength_goal` defaults to `'sport_support'` when `None` — the safest default for a concurrent athlete (minimal CNS interference with endurance training). `goal_weights` is `None` unless `strength_goal == 'combination'`. Signal assembly is tested independently of recommendation logic.
 
 **Heuristic thresholds:** The following values are derived from sports science literature and validated against the Vlad dataset. They are labelled `# HEURISTIC` in code and may require per-athlete calibration as more data accumulates: TRIMP sex coefficients (Banister `[1]`), TAU_ATL=7 and TAU_CTL=42 (Morton `[2]`), HRV z-score thresholds (-1.5 / +1.0), biomechanics fatigue index weights (50/30/20), muscle decay τ defaults, and cycle phase intensity scales. None of these should be changed without at least 20 sessions of evidence showing systematic drift.
 
@@ -150,6 +150,96 @@ CREATE TABLE user_1rm_cache (
   UNIQUE (user_id, exercise_id)
 );
 -- Invalidate and recompute on every new strength_sets insert for this exercise.
+
+-- ── Movement pattern catalog ───────────────────────────────────────────────
+CREATE TABLE movement_patterns (
+  pattern_key         VARCHAR(30) PRIMARY KEY,
+  display_name        VARCHAR(100),
+  fatigue_decay_tau_h FLOAT NOT NULL DEFAULT 48.0,
+  -- HEURISTIC — hours for fatigue to decay to 1/e of peak load.
+  -- Slower-recovering patterns (POWER_FULL_BODY=72h) reflect deeper neural demand.
+  -- Calibrate per-athlete after ≥ 20 sessions.
+  notes               TEXT
+);
+INSERT INTO movement_patterns (pattern_key, display_name, fatigue_decay_tau_h) VALUES
+  ('POWER_FULL_BODY', 'Full-Body Power',   72.0),
+  ('HIP_HINGE',       'Hip Hinge',         60.0),
+  ('KNEE_DOMINANT',   'Knee Dominant',     60.0),
+  ('HORIZONTAL_PUSH', 'Horizontal Push',   48.0),
+  ('HORIZONTAL_PULL', 'Horizontal Pull',   48.0),
+  ('VERTICAL_PUSH',   'Vertical Push',     48.0),
+  ('VERTICAL_PULL',   'Vertical Pull',     48.0),
+  ('CARRY_BRACE',     'Carry / Brace',     36.0),
+  ('ISOLATION',       'Isolation',         24.0);
+
+-- ── Exercise ontology columns ──────────────────────────────────────────────
+-- Extends the existing exercises table (797 entries; exercise_id FK already used by user_1rm_cache).
+-- cns_cost and local_fatigue_cost are independent axes:
+--   power clean: cns_cost=5.0, local_fatigue_cost=2.5 (high neural, moderate local damage)
+--   BSS high-rep: cns_cost=1.5, local_fatigue_cost=4.5 (low neural, high local damage)
+ALTER TABLE exercises
+  ADD COLUMN IF NOT EXISTS primary_pattern     VARCHAR(30)
+    REFERENCES movement_patterns(pattern_key),
+  ADD COLUMN IF NOT EXISTS secondary_patterns  VARCHAR(30)[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS equipment           VARCHAR(20)[] NOT NULL DEFAULT '{}',
+  -- Valid values: 'BARBELL','DUMBBELL','CABLE','MACHINE','BODYWEIGHT','SMITH'. App-layer validated.
+  ADD COLUMN IF NOT EXISTS cns_cost            FLOAT NOT NULL DEFAULT 2.5
+    CHECK (cns_cost BETWEEN 1.0 AND 5.0),
+  ADD COLUMN IF NOT EXISTS local_fatigue_cost  FLOAT NOT NULL DEFAULT 2.5
+    CHECK (local_fatigue_cost BETWEEN 1.0 AND 5.0),
+  ADD COLUMN IF NOT EXISTS skill_level         SMALLINT NOT NULL DEFAULT 1
+    CHECK (skill_level IN (1,2,3)),
+  ADD COLUMN IF NOT EXISTS velocity_based      BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS bilateral           BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS tags                TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS permanent_fixture   BOOLEAN NOT NULL DEFAULT FALSE;
+  -- permanent_fixture=TRUE: appended to every session after solver output; see §7.0.5.
+
+-- ── Exercise relationship graph ────────────────────────────────────────────
+-- Encodes ontology graph edges between exercises.
+-- SUBSTITUTES and FATIGUES_SAME are bidirectional — insert both directions (A→B and B→A).
+-- PROGRESSES_TO / REGRESSES_TO are directed (A→B only).
+-- ANTAGONIST is bidirectional — insert both directions.
+CREATE TABLE exercise_relationships (
+  relationship_id   SERIAL PRIMARY KEY,
+  exercise_a_id     INT NOT NULL REFERENCES exercises(exercise_id),
+  exercise_b_id     INT NOT NULL REFERENCES exercises(exercise_id),
+  relationship_type VARCHAR(30) NOT NULL
+    CHECK (relationship_type IN ('SUBSTITUTES','PROGRESSES_TO','REGRESSES_TO','FATIGUES_SAME','ANTAGONIST')),
+  notes             TEXT,
+  UNIQUE (exercise_a_id, exercise_b_id, relationship_type)
+);
+
+-- ── Pattern fatigue ledger ─────────────────────────────────────────────────
+-- Per-athlete, per-pattern fatigue load written after each strength session.
+-- fatigue_units = sum of (cns_cost + local_fatigue_cost) for all sets in that pattern that session.
+-- Residual at query time is computed in-memory by compute_pattern_fatigue_residuals() — not stored.
+CREATE TABLE pattern_fatigue_ledger (
+  ledger_id     SERIAL PRIMARY KEY,
+  user_id       INT  NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  pattern_key   VARCHAR(30) NOT NULL REFERENCES movement_patterns(pattern_key),
+  session_date  DATE NOT NULL,
+  fatigue_units FLOAT NOT NULL,
+  computed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, pattern_key, session_date)
+);
+
+-- ── Exercise session log ───────────────────────────────────────────────────
+-- Records which exercises the CSP solver selected for each strength session and in what order.
+-- constraint_violations_bypassed: populated when user_override bypassed a solver constraint;
+-- retained for analytics — lets us detect which constraints users most frequently override.
+CREATE TABLE exercise_session_log (
+  log_id                        SERIAL PRIMARY KEY,
+  user_id                       INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  session_date                  DATE NOT NULL,
+  exercise_id                   INT NOT NULL REFERENCES exercises(exercise_id),
+  slot_index                    SMALLINT NOT NULL,
+  selected_by                   VARCHAR(20) NOT NULL DEFAULT 'csp_solver'
+    CHECK (selected_by IN ('csp_solver','user_override')),
+  constraint_violations_bypassed TEXT[] DEFAULT '{}',
+  UNIQUE (user_id, session_date, slot_index)
+);
 
 -- ── Injuries (extended) ───────────────────────────────────────────────────
 -- The injuries table already exists in schema.sql. Run this migration to extend it.
@@ -378,6 +468,20 @@ CREATE TABLE training_plan_weeks (
   notes              TEXT,
   UNIQUE (plan_id, week_number)
 );
+
+-- ── Strength goal per training plan ───────────────────────────────────────
+-- Drives exercise selection, CNS budget, and loading in §7.0.
+-- DEFAULT 'sport_support': safest default for a concurrent athlete — minimal CNS
+-- interference with endurance training.
+ALTER TABLE training_plans
+  ADD COLUMN IF NOT EXISTS strength_goal VARCHAR(20) NOT NULL DEFAULT 'sport_support'
+    CHECK (strength_goal IN ('strength','hypertrophy','sport_support','combination')),
+  ADD COLUMN IF NOT EXISTS goal_weights  JSONB;
+  -- Required when strength_goal = 'combination'.
+  -- Shape: {"strength": 0.4, "hypertrophy": 0.3, "sport_support": 0.3}
+  -- Values must sum to 1.0 ± 0.01. Keys must be subset of {'strength','hypertrophy','sport_support'}.
+  -- Validated at plan creation endpoint. NULL when strength_goal != 'combination'.
+  -- NEVER read goal_weights without first checking strength_goal == 'combination'.
 ```
 
 ---
@@ -407,6 +511,8 @@ Every signal has a defined **source**, **compute trigger**, **storage**, and **n
 | `hr_rpe_ratio` | `workouts.avg_hr`, `workout_reflection.session_rpe` | `compute_hr_rpe_ratio()` | In-memory at request | Request time | < 10 same-sport sessions |
 | `cycle_phase` | `menstrual_cycles` | `estimate_cycle_phase()` | In-memory at request | Request time | No record < 60 days old |
 | `hr_stability_last_10min` | `workout_metrics.heart_rate` | `compute_hr_stability()` | `workouts.hr_stability_last_10min` | Post Garmin sync | < 10 HR readings in final 10 min |
+| `pattern_fatigue_residuals` | `pattern_fatigue_ledger` | `compute_pattern_fatigue_residuals()` | In-memory at request | Request time | No ledger rows in past 7 days (returns all-zero residuals — solver still runs) |
+| `exercise_history_recency` | `exercise_session_log` | `compute_exercise_recency()` | In-memory at request | Request time | No session log rows (all exercises treated as equally fresh) |
 
 **`hr_stability_last_10min` computation:** Post-sync job. Slice `workout_metrics` rows for the final 10 minutes of each session; compute the coefficient of variation (CV) of `heart_rate` values in that slice. CV < 0.05 (< 5%) indicates a stable steady-state HR — used by `compute_zone_speeds()` to filter out intervals and surges that would distort zone speed calibration.
 
@@ -1209,6 +1315,160 @@ def apply_cycle_modifiers(rec: dict, phase: str | None, scale: float) -> dict:
 
 ## 7. Strength Prescription
 
+### 7.0 Exercise Ontology & Session Builder
+
+Sections §7.1–§7.4 prescribe load, rep, and set parameters for a given exercise. Exercise selection itself — deciding *which* exercises populate a session — is governed by the constraint satisfaction system defined here. The output of the session builder is an ordered list of `(exercise_id, slot_index)` pairs; each pair is then passed individually to `prescribe_load_for_goal()` (§7.2). The LLM (Claude API) is never involved in selection decisions — all logic is deterministic, testable, and explainable.
+
+#### 7.0.1 Movement Pattern Taxonomy
+
+Every exercise has exactly one `primary_pattern` and zero or more `secondary_patterns`. Fatigue is tracked and decayed at the `primary_pattern` level only for residual computation; secondary pattern overlap is checked as a stacking constraint (§7.0.4 soft constraint 3). `[28]`
+
+| Pattern | Description | Canonical examples | fatigue_decay_tau_h | goal_primary_for | goal_deprioritized |
+|---------|-------------|-------------------|---------------------|-----------------|-------------------|
+| `POWER_FULL_BODY` | Full-body explosive movements | Power clean, hang snatch, KB swing | 72 | sport_support | hypertrophy |
+| `HIP_HINGE` | Posterior chain via hip extension | Deadlift, RDL, good morning | 60 | strength, sport_support | — |
+| `KNEE_DOMINANT` | Quad-led via knee flexion/extension | Squat, front squat, BSS | 60 | strength, hypertrophy, sport_support | — |
+| `HORIZONTAL_PUSH` | Horizontal press | Bench press, push-up, DB press | 48 | strength, hypertrophy | sport_support* |
+| `HORIZONTAL_PULL` | Horizontal pull towards body | Barbell row, cable row, DB row | 48 | strength, hypertrophy | — |
+| `VERTICAL_PUSH` | Overhead press | OHP, push press, Arnold press | 48 | strength, hypertrophy | sport_support* |
+| `VERTICAL_PULL` | Vertical pull towards body | Pull-up, lat pulldown, pullover | 48 | strength, sport_support | — |
+| `CARRY_BRACE` | Loaded carries and anti-rotation | Farmer carry, suitcase carry, Pallof press | 36 | sport_support | strength, hypertrophy |
+| `ISOLATION` | Single-joint, single-muscle | Bicep curl, tricep ext, leg curl | 24 | hypertrophy | strength, sport_support |
+
+\*`sport_support` deprioritizes `HORIZONTAL_PUSH` and `VERTICAL_PUSH` as **primary** slots only — they remain eligible as secondary/accessory slots.
+
+**Combination goals:** For `strength_goal = 'combination'`, `goal_primary_for` and `goal_deprioritized` are blended proportionally by `goal_weights`. A pattern that is primary for `strength` (weight 0.4) and deprioritized for `hypertrophy` (weight 0.3) has a net priority score = 0.4 − 0.3 = +0.1 — included but not given top priority.
+
+#### 7.0.2 Fatigue Residual Computation
+
+```python
+def compute_pattern_fatigue_residuals(
+    query_datetime: datetime,
+    ledger_rows:    list[dict],       # {pattern_key, session_date, fatigue_units} — past 7 days
+    tau_map:        dict[str, float], # pattern_key → fatigue_decay_tau_h from movement_patterns
+) -> dict[str, float]:                # pattern_key → residual (0.0 if no rows for that pattern)
+    # HEURISTIC — tau values in movement_patterns table; calibrate per-athlete after ≥ 20 sessions
+    residuals = {p: 0.0 for p in tau_map}
+    for row in ledger_rows:
+        # Treat session as completed at noon — conservative midday assumption
+        session_dt    = datetime.combine(row['session_date'], time(12, 0))
+        hours_elapsed = (query_datetime - session_dt).total_seconds() / 3600
+        if hours_elapsed < 0:
+            continue
+        tau = tau_map.get(row['pattern_key'], 48.0)
+        residuals[row['pattern_key']] += row['fatigue_units'] * exp(-hours_elapsed / tau)
+    return {k: round(v, 3) for k, v in residuals.items()}
+```
+
+**Residual thresholds** (HEURISTIC):
+
+| Residual | Label | Solver behavior |
+|----------|-------|----------------|
+| < 1.5 | fresh | No constraint |
+| 1.5 – 3.0 | fatigued | Deprioritize; prefer substitute |
+| > 3.0 | depleted | Hard exclude from session |
+
+#### 7.0.3 Exercise Recency
+
+```python
+def compute_exercise_recency(
+    log_rows:      list[dict],   # exercise_session_log rows for this user
+    lookback_days: int = 14,
+) -> dict[int, int | None]:      # exercise_id → days_since_last_used (None if not in window)
+    today   = date.today()
+    recency: dict[int, int] = {}
+    for row in log_rows:
+        eid  = row['exercise_id']
+        days = (today - row['session_date']).days
+        if eid not in recency or days < recency[eid]:
+            recency[eid] = days
+    return recency   # missing key = not used in lookback window → treated as None (eligible)
+```
+
+Minimum recency gap enforced by solver: 3 days for exercises with `cns_cost >= 4.0`; 1 day for all others. `None` (not used in window) = eligible.
+
+#### 7.0.4 CSP Session Builder
+
+`build_strength_session()` is a constraint satisfaction function. **Variables** = exercise slots (count determined by `session_type`, `strength_phase_key`, and `strength_goal`). **Domain** per slot = exercises filtered to valid candidates. Constraints are **hard** (must satisfy — violation excludes candidate) or **soft** (prefer to satisfy — used for ranking among valid candidates).
+
+**Slot allocation by session type and goal:**
+
+| session_type | strength slots | hypertrophy slots | sport_support slots |
+|--------------|---------------|-------------------|---------------------|
+| `upper` | 2 compound + 2 accessory | 2 compound + 3 accessory | 1 power + 2 compound + 1 accessory |
+| `lower` | 2 compound + 1 accessory | 2 compound + 3 accessory | 1 power + 2 compound + 1 accessory |
+| `full_body` | 3 compound + 2 accessory | 3 compound + 4 accessory | 2 power + 2 compound + 2 accessory |
+
+Compound slot = `primary_pattern` in `goal_primary_for`, `skill_level >= 2`.
+Accessory slot = any eligible pattern, `skill_level >= 1`.
+Power slot = `primary_pattern == POWER_FULL_BODY` (`sport_support` only; requires `skill_level >= 2`).
+For `combination`: blend slot counts by rounding the weighted average.
+
+```python
+def build_strength_session(
+    session_type:        str,           # 'upper' | 'lower' | 'full_body'
+    strength_phase_key:  str,           # from strength_phase_catalog
+    readiness_level:     str,           # from aggregate_readiness()
+    pattern_residuals:   dict,          # from compute_pattern_fatigue_residuals()
+    exercise_recency:    dict,          # from compute_exercise_recency()
+    available_equipment: list[str],     # from user_profile or session input
+    athlete_skill_level: int,           # 1–3
+    gate_result:         dict | None,   # if no_strength=True → return empty list
+    cycle_phase:         str | None,    # female athlete: 'menstruation' blocks heavy lower
+    strength_goal:       str,           # 'strength'|'hypertrophy'|'sport_support'|'combination'
+    goal_weights:        dict | None,   # required if strength_goal == 'combination'
+) -> list[dict]:                        # ordered list of exercise slots
+```
+
+**Hard constraints** (violating any = candidate excluded from slot):
+
+1. `equipment_available`: `exercise.equipment` intersects `available_equipment` (or includes `'BODYWEIGHT'`)
+2. `skill_eligible`: `exercise.skill_level <= athlete_skill_level`
+3. `pattern_not_depleted`: `pattern_residuals[primary_pattern] <= 3.0`
+4. `recency_gap`: `days_since_last_used >= min_gap` (3d if `cns_cost >= 4.0` else 1d; `None` = eligible)
+5. `session_type_match`: upper session excludes `KNEE_DOMINANT` and `HIP_HINGE` as primary slots (eligible as accessory); lower excludes `HORIZONTAL_PUSH`, `HORIZONTAL_PULL`, `VERTICAL_PUSH`, `VERTICAL_PULL` as primary slots
+6. `no_heavy_lower_if_flagged`: if `cycle_phase in ('menstruation', 'late_luteal')` and `primary_pattern in ('KNEE_DOMINANT', 'HIP_HINGE')` → exclude high-load slots (`skill_level >= 2` and `cns_cost >= 3.5`)
+7. `no_strength_gate`: if `gate_result` and `gate_result['no_strength']` → return `[]`
+8. `goal_pattern_exclusion`: if pattern is in `goal_deprioritized` for the current goal **and** `pattern_residuals[primary_pattern] > 1.0` (fatigued) → hard-exclude from primary slots. At residual ≤ 1.0 (fresh), pattern remains eligible — freshness overrides deprioritization. For `combination`: exclude from primary slots only if blended net priority score < −0.2 **and** residual > 1.0.
+
+**Soft constraints** (used for candidate ranking score within a slot):
+
+1. `pattern_freshness_preference`: lower residual → higher score
+2. `cns_budget`: total session `cns_cost` sum should not exceed `CNS_BUDGET[strength_goal][readiness_level]`; candidates that would exceed remaining budget are penalized (not excluded)
+3. `no_secondary_pattern_stacking`: if a prior slot already exercises a pattern matching this candidate's `secondary_patterns` → penalize
+4. `exercise_variety`: prefer exercises not used in the last 7 days
+5. `goal_pattern_affinity`: rank candidates higher when their `primary_pattern` appears in `goal_primary_for` for the current goal. Score contribution: +2.0 for direct match. For `combination`: contribution = `sum(weight × 2.0)` for each component goal where the pattern is primary.
+6. `goal_cns_preference`: for `strength` and `sport_support`, rank higher-`cns_cost` exercises higher within a pattern (prefer explosive/heavy variants). For `hypertrophy`, rank lower-`cns_cost`, higher-volume exercises higher. For `combination`: `cns_preference_score = strength_w × cns_cost + hypertrophy_w × (6.0 − cns_cost) + sport_support_w × cns_cost`.
+
+```python
+# HEURISTIC — strength gets higher CNS budget because maximal recruitment requires
+# higher neural drive; hypertrophy is volume-driven, not CNS-limited. [28][29]
+CNS_BUDGET: dict[str, dict[str, float]] = {
+    'strength': {
+        'peak': 22.0, 'good': 18.0, 'moderate': 13.0, 'low': 9.0, 'rest': 6.0
+    },
+    'hypertrophy': {
+        'peak': 14.0, 'good': 11.0, 'moderate': 8.0, 'low': 6.0, 'rest': 4.0
+    },
+    'sport_support': {
+        'peak': 18.0, 'good': 14.0, 'moderate': 10.0, 'low': 7.0, 'rest': 5.0
+    },
+}
+# 'combination': blend budgets proportionally by goal_weights at call time.
+```
+
+**Sequencing:** After slot selection, order results by `SEQUENCE_PRIORITY` (§7.3). `POWER_FULL_BODY` exercises always go to `slot_index=0`. `[28]`
+
+**Ledger update:** After session completion, the caller inserts one row into `pattern_fatigue_ledger` per pattern exercised, with `fatigue_units = sum(cns_cost + local_fatigue_cost)` across all sets for exercises in that pattern. Done by `update_pattern_fatigue_ledger()` — called by the post-session sync job, not by `build_strength_session()`. `[29]`
+
+#### 7.0.5 Permanent Fixtures
+
+Some exercises appear in every session regardless of CSP solver output. They are appended after solver output, after sequencing. `exercises.permanent_fixture = TRUE` (added via migration — see §2). Permanent fixtures are exempt from recency and pattern depletion checks but still subject to the `no_strength` gate.
+
+Current permanent fixture: **face_pull** (`tags: ['shoulder_health']`). Appended to every `upper` and `full_body` session as the final slot.
+
+---
+
 ### 7.1 Loading zones `[16] Kraemer & Ratamess 2004`
 
 | Variable | Athlete (concurrent) | Strength | Hypertrophy |
@@ -1249,6 +1509,41 @@ def prescribe_load(
         'load_pct_1rm':  f'{round(lo*100)}–{round(hi*100)}%',
         'rest_s':         REST_S[goal],
         'note': '',
+    }
+
+def prescribe_load_for_goal(
+    estimated_1rm:   float | None,
+    strength_goal:   str,
+    goal_weights:    dict | None,
+    readiness_level: str,
+) -> dict:
+    # Routes to prescribe_load() for single goals.
+    # For 'combination', blends load ranges proportionally by goal_weights.
+    # Replace all prescribe_load() calls in the strength subsystem with this wrapper.
+    if strength_goal != 'combination':
+        goal_key = 'athlete' if strength_goal == 'sport_support' else strength_goal
+        return prescribe_load(estimated_1rm, goal_key, readiness_level)
+
+    if estimated_1rm is None:
+        return {'load_kg_range': None, 'load_pct_1rm': None,
+                'note': 'No 1RM data — work to a challenging weight for the rep range'}
+    blended_lo = blended_hi = 0.0
+    for g, w in goal_weights.items():
+        goal_key    = 'athlete' if g == 'sport_support' else g
+        lo, hi      = LOAD_PCT[goal_key][readiness_level]
+        blended_lo += lo * w
+        blended_hi += hi * w
+
+    rest_blended = round(sum(
+        REST_S['athlete' if g == 'sport_support' else g] * w
+        for g, w in goal_weights.items()
+    ))
+    return {
+        'load_kg_range': [round(estimated_1rm * blended_lo, 1),
+                          round(estimated_1rm * blended_hi, 1)],
+        'load_pct_1rm':  f'{round(blended_lo*100)}–{round(blended_hi*100)}%',
+        'rest_s':         rest_blended,
+        'note':           f'Blended prescription: {goal_weights}',
     }
 ```
 
@@ -1390,17 +1685,32 @@ interface Recommendation {
     timing:        string | null;      // "after_run_3h_min" | "anytime" | null
     session_type:  'upper'|'lower'|'full_body' | null;
     goal:          string | null;
+    strength_goal: 'strength'|'hypertrophy'|'sport_support'|'combination';
+    goal_weights:  Record<string, number> | null;  // null unless combination
+    slot_allocation: {                // actual slots used this session
+      power:     number;
+      compound:  number;
+      accessory: number;
+    };
     exercises: Array<{
-      name:          string;
-      sets:          number;
-      reps:          number | null;
-      load_kg_range: [number, number] | null;
-      load_pct_1rm:  string | null;
-      rest_s:        number;
-      velocity_cue:  string;
-      note:          string;
+      name:             string;
+      sets:             number;
+      reps:             number | null;
+      load_kg_range:    [number, number] | null;
+      load_pct_1rm:     string | null;
+      rest_s:           number;
+      velocity_cue:     string;
+      note:             string;
+      exercise_id:      number;           // FK to exercises table
+      primary_pattern:  string;           // e.g. "POWER_FULL_BODY"
+      slot_index:       number;           // 0-indexed position in session
+      selected_by:      'csp_solver' | 'permanent_fixture' | 'user_override';
+      pattern_residual: number | null;    // residual at time of selection (for transparency)
     }>;
-    sequencing_note: string | null;
+    sequencing_note:  string | null;
+    cns_budget_used:  number | null;    // total CNS cost of selected exercises
+    cns_budget_cap:   number | null;    // CNS_BUDGET[strength_goal][readiness_level]
+    ontology_version: string | null;    // semver of exercise ontology; for cache invalidation
   };
 
   modifiers_applied: {
@@ -1412,6 +1722,8 @@ interface Recommendation {
     cycle_phase:            string | null;
     cycle_modifier_active:  boolean;
     hr_rpe_status:          string | null;
+    pattern_fatigue:        Record<string, number> | null;
+    // dict of pattern_key → residual for all 9 patterns; null if no ledger data
   };
 
   alerts:    Array<{ tier: string; message: string }>;
@@ -1582,6 +1894,21 @@ These are the minimum acceptance tests for the recommendation engine. Each scena
 | **P2** | Female athlete protocol — Garmin menstrual JSON ingest + phase estimation (§6) |
 | **P2** | `confidence` score (§9) |
 | **P2** | Onboarding questionnaire additions |
+| **P2 (ontology)** | `movement_patterns` catalog table + seed data (§7.0.1) |
+| **P2 (ontology)** | `exercises` table extension — `ALTER TABLE` for ontology columns (§2) |
+| **P2 (ontology)** | `exercise_relationships` table (§2) |
+| **P2 (ontology)** | `pattern_fatigue_ledger` table (§2) |
+| **P2 (ontology)** | `exercise_session_log` table (§2) |
+| **P2 (ontology)** | `training_plans` schema extension — `strength_goal`, `goal_weights` columns (§2) |
+| **P2 (ontology)** | `goal_weights` validation logic in plan creation endpoint (values sum to 1.0 ± 0.01; keys valid) |
+| **P2 (ontology)** | `compute_pattern_fatigue_residuals()` (§7.0.2) |
+| **P2 (ontology)** | `compute_exercise_recency()` (§7.0.3) |
+| **P2 (ontology)** | `build_strength_session()` CSP solver — hard + soft constraints (§7.0.4) |
+| **P2 (ontology)** | `prescribe_load_for_goal()` wrapper — routes and blends for `combination` (§7.2) |
+| **P2 (ontology)** | Goal-stratified `CNS_BUDGET` constants (§7.0.4) |
+| **P2 (ontology)** | `goal_pattern_affinity` and `goal_cns_preference` soft constraints in solver (§7.0.4) |
+| **P2 (ontology)** | `update_pattern_fatigue_ledger()` post-session job (§7.0.4) |
+| **P2 (ontology)** | Output contract extension — new fields in `strength_block` and `modifiers_applied` (§9) |
 | **P3** | Zone speed computation job (§3.10) |
 | **P3** | Pre-competition gate UI — competition calendar form |
 | **P3** | Swinton effect size thresholds on progress page (§7.4) |
@@ -2540,3 +2867,6 @@ All sources feed into the same `adapt_session_to_signals()` and `build_recommend
 | 25 | Fitzgerald, M. (2014). *80/20 Running*. Rodale. | 80/20 as population optimum; moderate-intensity trap; beginner TID importance |
 | 26 | Fitzgerald, J. (2019). Periodization for runners: how to use mesocycles to train smarter. *StrengthRunning.com*. | Linear vs nonlinear models; mesocycle 4–6 week range; Lydiard/Canova; tier-agnostic session types |
 | 27 | Fitzgerald, J. (2018). The three goals of base training. *StrengthRunning.com*. | Endurance + neuromuscular + GPP triad; strides as base-phase tool; hill sprints in base |
+| 28 | Tsatsouline, P. & Contreras, B. (2014). Neuroscience, motor learning, and strength training. *Strength & Cond J*, 36(5), 100–104. | CNS cost concept; explosive movement sequencing first |
+| 29 | Damas, F. et al. (2016). Resistance training-induced changes in integrated myofibrillar protein synthesis. *J Physiol*, 594(18), 5209. | Local fatigue cost distinct from CNS cost; muscle damage peaks at novel/eccentric exercises |
+| 30 | Kumar, T.K. (1992). Multivariate analysis in constraint satisfaction. *IEEE Trans SMC*. | CSP framing reference for exercise selection system |
