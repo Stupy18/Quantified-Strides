@@ -411,6 +411,27 @@ CREATE TABLE strength_phase_catalog (
   scheduling_note TEXT,
   rationale       TEXT
 );
+-- Seed rows — valid phase_key values and their structural parameters.
+-- These four phases map directly to the running periodization phases in §14.4/§14.8.
+INSERT INTO strength_phase_catalog
+  (phase_key, display_label, sessions_pw, sets_range, reps_range, load_pct_range, plyometrics, scheduling_note, rationale)
+VALUES
+  ('gpp', 'General Physical Preparation', 2, '3–5', '8–15', '50–70%',
+   FALSE,
+   'Schedule on non-quality-run days; minimum 24h from running session.',
+   'Builds work capacity and connective tissue. Bilateral compound movements, high volume. No plyometrics — joints not yet conditioned.'),
+  ('spp', 'Specific Physical Preparation', 2, '3–4', '6–10', '65–80%',
+   FALSE,
+   'Schedule on non-quality-run days; minimum 24h from threshold or interval sessions.',
+   'Transitions to unilateral, running-specific movements. Plyometrics introduced conservatively (box jumps, split jumps) — plyometrics flag FALSE; add as accessory only via strength_phase_exercises entries.'),
+  ('power', 'Power / Peak Phase', 2, '2–4', '3–6', '75–90%',
+   TRUE,
+   'Final strength session ≥ 5 days before A-race. Lower CNS budget than gpp/spp — explosive work is costly.',
+   'Low volume, maximal intensity, full plyometrics. Preserves peak neuromuscular sharpness while reducing fatigue accumulation into taper.'),
+  ('maintenance', 'In-Season Maintenance', 1, '1–2', '5–8', '70–85%',
+   FALSE,
+   'One session per week, never within 48h of race or long run.',
+   'Neural activation only — two sets sufficient for strength retention. [17] Häkkinen et al. 2004.');
 
 -- Exercises for each strength phase reference the existing exercises table (797 entries).
 -- priority: 1 = must-include; 5 = optional given recovery / freshness constraints.
@@ -526,6 +547,8 @@ def compute_hr_stability(hr_series: list[int]) -> float | None:
 ```
 
 Add column `hr_stability_last_10min FLOAT` to `workouts` via migration.
+
+**Relationship between `muscle_freshness` and `pattern_fatigue_residuals`:** These signals track strength fatigue through different mechanisms and serve distinct purposes — neither is deprecated. `muscle_freshness` (§3.6) operates at muscle-group level, computed directly from raw `strength_sets` volume (weight × reps × sets × involvement), available from day 1 with no ledger dependency. It drives the dashboard freshness heatmap and provides a cold-start approximation when the pattern ledger is thin. `pattern_fatigue_residuals` (§7.0.2) operates at movement-pattern level, uses CNS-weighted cost units (`cns_cost + local_fatigue_cost`), and requires `pattern_fatigue_ledger` rows written by `update_pattern_fatigue_ledger()` post-session. The CSP solver (§7.0.4) uses `pattern_fatigue_residuals` as its primary fatigue signal. **Cold-start rule (HEURISTIC):** when `pattern_fatigue_ledger` has fewer than **5 session entries** for a given pattern, the solver approximates the residual from `muscle_freshness` by mapping the pattern's primary muscle groups to their freshness scores: `residual_approx = (1 − mean(freshness[primary_muscles])) × 3.0`. Above 5 sessions, `muscle_freshness` is used only for the dashboard heatmap and is not fed into the solver.
 
 ---
 
@@ -1419,6 +1442,12 @@ def build_strength_session(
     goal_weights:        dict | None,   # required if strength_goal == 'combination'
 ) -> list[dict]:                        # ordered list of exercise slots
 ```
+
+**`strength_phase_key` role in slot selection:** The phase key has two effects on candidate scoring and eligibility. Valid keys: `'gpp'`, `'spp'`, `'power'`, `'maintenance'` (see §2 seed rows for full parameters).
+
+1. **Exercise candidacy preference:** `strength_phase_exercises` maps each phase to a prioritized exercise list. Exercises with `priority = 1` (must-include) for the current phase receive a +3.0 score bonus in soft constraint ranking; `priority = 5` (optional) exercises are eligible but receive no bonus. Exercises absent from the phase's `strength_phase_exercises` rows are **not** hard-excluded — the full `exercises` table is the candidate pool; the phase list is a preference filter, not a gate.
+
+2. **Plyometric eligibility:** if `strength_phase_catalog.plyometrics = FALSE` for the current phase (`gpp`, `spp`, `maintenance`), exercises tagged `'plyometric'` are hard-excluded from primary compound slots. Phase `power` enables plyometrics (`plyometrics = TRUE`). `spp` keeps the flag `FALSE` — plyometric accessories for `spp` are seeded explicitly in `strength_phase_exercises` with `priority = 5` and accessed as accessory slots only.
 
 **Hard constraints** (violating any = candidate excluded from slot):
 
