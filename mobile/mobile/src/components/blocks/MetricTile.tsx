@@ -14,9 +14,10 @@ interface MetricTileProps {
   badgeLabel?: string
   caption?: string
   sparklineData?: number[]
+  chart?: React.ReactNode
 }
 
-export function MetricTile({ label, value, unit, badgeLabel, caption, sparklineData }: MetricTileProps) {
+export function MetricTile({ label, value, unit, badgeLabel, caption, sparklineData, chart }: MetricTileProps) {
   const theme = useTheme()
   return (
     <InfoCard style={{ flex: 1, marginBottom: 0 }}>
@@ -32,7 +33,7 @@ export function MetricTile({ label, value, unit, badgeLabel, caption, sparklineD
           </Text>
         )}
       </View>
-      {sparklineData && <SparklineChart dataPoints={sparklineData} height={32} />}
+      {chart ?? (sparklineData && <SparklineChart dataPoints={sparklineData} height={32} />)}
       {caption && <Text style={[TEXT.narrativeSmall, { color: theme.textMuted, marginTop: SPACE.sm }]}>{caption}</Text>}
     </InfoCard>
   )
