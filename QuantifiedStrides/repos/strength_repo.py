@@ -57,7 +57,7 @@ class StrengthRepo:
                 WHERE ss.user_id = :user_id
                   AND ss.session_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
                 GROUP BY ss.session_id, ss.session_date, ss.session_type
-                ORDER BY ss.session_date DESC
+                ORDER BY ss.session_id DESC
             """),
             {"user_id": user_id, "days": days},
         )
@@ -158,16 +158,13 @@ class StrengthRepo:
 
     # ── session mutations ──────────────────────────────────────────────────────
 
-    async def upsert_session(
+    async def insert_session(
         self, user_id: int, session_date: date, session_type: str, raw_notes: str | None
     ) -> int:
         result = await self.db.execute(
             text("""
                 INSERT INTO strength_sessions (user_id, session_date, session_type, raw_notes)
                 VALUES (:user_id, :session_date, :session_type, :raw_notes)
-                ON CONFLICT (user_id, session_date) DO UPDATE SET
-                    session_type = EXCLUDED.session_type,
-                    raw_notes    = EXCLUDED.raw_notes
                 RETURNING session_id
             """),
             {
@@ -193,11 +190,11 @@ class StrengthRepo:
                 INSERT INTO strength_exercises (session_id, exercise_order, name, notes, exercise_ref_id)
                 VALUES (
                     :sid, :order, :name, :notes,
-                    (SELECT exercise_id FROM exercises WHERE LOWER(name) = LOWER(:name) LIMIT 1)
+                    (SELECT exercise_id FROM exercises WHERE LOWER(name) = LOWER(:name_lookup) LIMIT 1)
                 )
                 RETURNING exercise_id
             """),
-            {"sid": session_id, "order": exercise_order, "name": name, "notes": notes},
+            {"sid": session_id, "order": exercise_order, "name": name, "notes": notes, "name_lookup": name},
         )
         return result.fetchone().exercise_id
 
@@ -268,7 +265,7 @@ class StrengthRepo:
                        COUNT(st.set_id) AS num_sets
                 FROM strength_sessions ss
                 JOIN strength_exercises se ON se.session_id = ss.session_id
-                LEFT JOIN exercises e      ON e.name = se.name
+                LEFT JOIN exercises e      ON e.exercise_id = se.exercise_ref_id
                 JOIN strength_sets st      ON st.exercise_id = se.exercise_id
                 WHERE ss.user_id = :uid
                   AND ss.session_date BETWEEN :start AND :until
@@ -297,7 +294,7 @@ class StrengthRepo:
                        e.primary_muscles, e.cns_load, e.systemic_fatigue
                 FROM ranked r
                 JOIN strength_exercises se ON se.session_id = r.session_id
-                LEFT JOIN exercises e      ON e.name = se.name
+                LEFT JOIN exercises e      ON e.exercise_id = se.exercise_ref_id
                 WHERE r.rn <= 2
                 ORDER BY r.session_date DESC, se.exercise_order
             """),

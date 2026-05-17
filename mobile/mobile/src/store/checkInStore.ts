@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { apiSaveReadiness, apiFetchReadiness, ReadinessPayload } from '../api/checkin'
+import { saveReadiness, fetchReadiness, ReadinessPayload } from '../api/endpoints/checkin'
 
 const STORE_KEY = 'qs_checkin_date'
 
@@ -24,11 +24,10 @@ interface CheckInState {
   modalVisible:   boolean
   loading:        boolean
   error:          string | null
-  // Pass token in so we can hit the backend as source of truth
-  hydrate:        (token: string) => Promise<void>
+  hydrate:        () => Promise<void>
   openModal:      () => void
   closeModal:     () => void
-  submitCheckIn:  (token: string, payload: CheckInPayload) => Promise<void>
+  submitCheckIn:  (payload: CheckInPayload) => Promise<void>
 }
 
 export const useCheckInStore = create<CheckInState>((set) => ({
@@ -38,25 +37,24 @@ export const useCheckInStore = create<CheckInState>((set) => ({
   loading:        false,
   error:          null,
 
-  hydrate: async (token: string) => {
+  hydrate: async () => {
     try {
-      // 1. Fast path: check AsyncStorage first to avoid any visible flash
+      // Fast path: check local cache to avoid a visible flash
       const stored = await AsyncStorage.getItem(STORE_KEY)
       if (stored === todayString()) {
         set({ submittedToday: true, hydrated: true })
         return
       }
-      // 2. Source of truth: ask the backend if today's entry exists
-      const existing = await apiFetchReadiness(token, todayString())
+      // Source of truth: ask the backend if today's entry exists
+      const existing = await fetchReadiness(todayString())
       if (existing) {
-        // Cache it so next cold start is instant
         await AsyncStorage.setItem(STORE_KEY, todayString())
         set({ submittedToday: true, hydrated: true })
       } else {
         set({ submittedToday: false, hydrated: true })
       }
     } catch {
-      // Network error or 404 — unblock the UI, let modal show
+      // Network error — unblock the UI, let modal show
       set({ hydrated: true })
     }
   },
@@ -64,7 +62,7 @@ export const useCheckInStore = create<CheckInState>((set) => ({
   openModal:  () => set({ modalVisible: true,  error: null }),
   closeModal: () => set({ modalVisible: false, error: null }),
 
-  submitCheckIn: async (token: string, payload: CheckInPayload) => {
+  submitCheckIn: async (payload: CheckInPayload) => {
     set({ loading: true, error: null })
     try {
       const apiPayload: ReadinessPayload = {
@@ -77,11 +75,11 @@ export const useCheckInStore = create<CheckInState>((set) => ({
         going_out_tonight: payload.goingOut,
         ...(payload.injuryNotes.trim() ? { injury_note: payload.injuryNotes.trim() } : {}),
       }
-      await apiSaveReadiness(token, apiPayload)
+      await saveReadiness(apiPayload)
       await AsyncStorage.setItem(STORE_KEY, todayString())
       set({ submittedToday: true, modalVisible: false, loading: false })
     } catch (e: any) {
-      set({ loading: false, error: e.message ?? 'Submission failed' })
+      set({ loading: false, error: e?.response?.data?.detail ?? e?.message ?? 'Submission failed' })
     }
   },
 }))

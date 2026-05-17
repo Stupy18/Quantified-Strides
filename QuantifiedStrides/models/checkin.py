@@ -43,6 +43,7 @@ class WorkoutReflectionCreateSchema(BaseModel):
     notes: str | None = None
     load_feel: int | None = Field(default=None, ge=-2, le=2)
     workout_id: int | None = None
+    session_id: int | None = None
 
 
 class WorkoutReflectionSchema(BaseModel):
@@ -54,6 +55,7 @@ class WorkoutReflectionSchema(BaseModel):
     notes: str | None
     load_feel: int | None
     workout_id: int | None = None
+    session_id: int | None = None
 
 
 # ---------------------------------------------------------------------------

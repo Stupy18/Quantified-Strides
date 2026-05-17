@@ -1,5 +1,5 @@
 import React from 'react'
-import { View, Text, StyleSheet } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { StatusBadge } from '../primitives/StatusBadge'
 import { useTheme } from '../../hooks/useTheme'
 import { TEXT, SPACE } from '../../theme'
@@ -10,11 +10,12 @@ interface WorkoutListRowProps {
   date: string
   tag: string
   isLast?: boolean
+  onPress?: () => void
 }
 
-export function WorkoutListRow({ title, subtitle, date, tag, isLast = false }: WorkoutListRowProps) {
+export function WorkoutListRow({ title, subtitle, date, tag, isLast = false, onPress }: WorkoutListRowProps) {
   const theme = useTheme()
-  return (
+  const inner = (
     <View style={[styles.row, !isLast && { borderBottomWidth: 1, borderBottomColor: theme.divider }]}>
       <View style={styles.left}>
         <Text style={[TEXT.bodyLarge, { color: theme.textPrimary, fontWeight: '500', marginBottom: 3 }]}>{title}</Text>
@@ -24,8 +25,20 @@ export function WorkoutListRow({ title, subtitle, date, tag, isLast = false }: W
         <Text style={[TEXT.monoSmall, { color: theme.textMuted, marginBottom: SPACE.xs }]}>{date}</Text>
         <StatusBadge label={tag} variant="outlined" />
       </View>
+      {onPress && (
+        <Text style={[TEXT.bodyLarge, { color: theme.textFaint, marginLeft: SPACE.sm }]}>›</Text>
+      )}
     </View>
   )
+
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.65}>
+        {inner}
+      </TouchableOpacity>
+    )
+  }
+  return inner
 }
 
 const styles = StyleSheet.create({

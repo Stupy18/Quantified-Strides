@@ -64,14 +64,20 @@ class CheckinRepo:
     # ── workout_reflection ─────────────────────────────────────────────────────
 
     async def upsert_reflection(self, user_id: int, data: dict):
+        session_id = data.get("session_id")
+        conflict = (
+            "ON CONFLICT (session_id) WHERE session_id IS NOT NULL"
+            if session_id is not None
+            else "ON CONFLICT (user_id, entry_date) WHERE session_id IS NULL"
+        )
         result = await self.db.execute(
-            text("""
+            text(f"""
                 INSERT INTO workout_reflection (
-                    user_id, entry_date, session_rpe, session_quality, notes, load_feel, workout_id
+                    user_id, entry_date, session_rpe, session_quality, notes, load_feel, workout_id, session_id
                 ) VALUES (
-                    :user_id, :entry_date, :session_rpe, :session_quality, :notes, :load_feel, :workout_id
+                    :user_id, :entry_date, :session_rpe, :session_quality, :notes, :load_feel, :workout_id, :session_id
                 )
-                ON CONFLICT (user_id, entry_date) DO UPDATE SET
+                {conflict} DO UPDATE SET
                     session_rpe     = EXCLUDED.session_rpe,
                     session_quality = EXCLUDED.session_quality,
                     notes           = EXCLUDED.notes,
@@ -79,9 +85,9 @@ class CheckinRepo:
                     workout_id      = COALESCE(EXCLUDED.workout_id, workout_reflection.workout_id)
                 RETURNING
                     reflection_id, user_id, entry_date, session_rpe, session_quality,
-                    notes, load_feel, workout_id
+                    notes, load_feel, workout_id, session_id
             """),
-            {"user_id": user_id, "workout_id": data.get("workout_id"), **data},
+            {"user_id": user_id, "workout_id": data.get("workout_id"), "session_id": session_id, **data},
         )
         return result.fetchone()
 
