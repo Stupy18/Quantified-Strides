@@ -51,12 +51,13 @@ async def get_weekly_volume(
 
 @router.get("/workouts", response_model=list[WorkoutListItemSchema])
 async def list_workouts(
-    days: int = Query(default=90, ge=7, le=365),
+    days: int = Query(default=90, ge=7),
     sport: str | None = Query(default=None),
+    before_date: date | None = Query(default=None),
     user_id: int = Depends(get_current_user_id),
     repo: WorkoutRepo = Depends(get_workout_repo),
 ):
-    return await _svc.list_workouts(repo, user_id, days, sport)
+    return await _svc.list_workouts(repo, user_id, days, sport, before_date)
 
 
 @router.get("/workouts/sports", response_model=list[str])

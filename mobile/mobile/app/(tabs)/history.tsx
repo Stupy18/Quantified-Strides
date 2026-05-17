@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { InfoCard } from '../../src/components/blocks/InfoCard'
 import { WorkoutListRow } from '../../src/components/blocks/WorkoutListRow'
@@ -8,7 +8,7 @@ import { SectionTitle } from '../../src/components/primitives/SectionTitle'
 import { MetricLabel } from '../../src/components/primitives/MetricLabel'
 import { SparklineChart } from '../../src/components/primitives/SparklineChart'
 import { useTheme } from '../../src/hooks/useTheme'
-import { useWorkoutHistory } from '../../src/hooks/useTrainingLoad'
+import { useWorkoutHistoryInfinite } from '../../src/hooks/useTrainingLoad'
 import { sportTag, workoutTitle, workoutSubtitle, formatWorkoutDate } from '../../src/utils/workout'
 import { TEXT, SPACE } from '../../src/theme'
 
@@ -49,10 +49,18 @@ export default function HistoryScreen() {
   const [activeFilter, setActiveFilter] = useState<Filter>('All')
   const [showAll, setShowAll] = useState(false)
 
-  const { data: workouts, isLoading, isError } = useWorkoutHistory(90)
+  const {
+    data,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useWorkoutHistoryInfinite(90)
+
+  const workouts = data?.pages.flat() ?? []
 
   const filtered = useMemo(() => {
-    if (!workouts) return []
     if (activeFilter === 'All') return workouts
     return workouts.filter(w => SPORT_FILTER[activeFilter].includes(w.sport))
   }, [workouts, activeFilter])
@@ -122,6 +130,21 @@ export default function HistoryScreen() {
         )}
       </InfoCard>
 
+      {showAll && hasNextPage && (
+        <TouchableOpacity
+          style={styles.loadOlder}
+          onPress={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage
+            ? <ActivityIndicator color={theme.accent} size="small" />
+            : <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
+                Load older →
+              </Text>
+          }
+        </TouchableOpacity>
+      )}
+
       {/* ── Trends (static placeholders — no API wired yet) ── */}
       <SectionTitle title="Trends" rightLabel="See all →" />
       <View style={styles.trendGrid}>
@@ -157,6 +180,10 @@ const styles = StyleSheet.create({
   center: {
     paddingVertical: SPACE.xl,
     alignItems: 'center',
+  },
+  loadOlder: {
+    alignItems: 'center',
+    paddingVertical: SPACE.md,
   },
   trendGrid: {
     flexDirection: 'row',

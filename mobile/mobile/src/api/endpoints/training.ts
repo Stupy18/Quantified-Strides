@@ -32,3 +32,13 @@ export async function fetchRecentWorkouts(days = 14): Promise<WorkoutListItem[]>
   const res = await apiClient.get('/training/workouts', { params: { days } })
   return res.data
 }
+
+export async function fetchWorkoutHistoryPage(
+  days = 90,
+  beforeDate?: string,
+): Promise<WorkoutListItem[]> {
+  const params: Record<string, unknown> = { days }
+  if (beforeDate) params.before_date = beforeDate
+  const res = await apiClient.get('/training/workouts', { params })
+  return res.data
+}
