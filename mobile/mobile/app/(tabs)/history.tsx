@@ -136,27 +136,24 @@ export default function HistoryScreen() {
         )}
       </InfoCard>
 
-      {showAll && hasNextPage && (
-        <TouchableOpacity
-          style={styles.loadOlder}
-          onPress={() => fetchNextPage()}
-          disabled={isFetchingNextPage}
-        >
-          {isFetchingNextPage
-            ? <ActivityIndicator color={theme.accent} size="small" />
-            : <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
-                Load older →
-              </Text>
-          }
-        </TouchableOpacity>
-      )}
-
       {showAll && (
-        <TouchableOpacity style={styles.loadOlder} onPress={collapse}>
-          <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
-            ↑ Show less
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity onPress={collapse}>
+            <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
+              ↑ Show less
+            </Text>
+          </TouchableOpacity>
+          {hasNextPage && (
+            <TouchableOpacity onPress={() => fetchNextPage()} disabled={isFetchingNextPage}>
+              {isFetchingNextPage
+                ? <ActivityIndicator color={theme.accent} size="small" />
+                : <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
+                    Load older →
+                  </Text>
+              }
+            </TouchableOpacity>
+          )}
+        </View>
       )}
 
       {/* ── Trends (static placeholders — no API wired yet) ── */}
@@ -195,7 +192,9 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.xl,
     alignItems: 'center',
   },
-  loadOlder: {
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: SPACE.md,
   },
