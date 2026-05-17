@@ -40,7 +40,7 @@ export function ActionButton({
     >
       <Text style={[fontSize, { color: textColor }]}>{label}</Text>
       {rightLabel && (
-        <Text style={[TEXT.monoSmall, { color: textColor, opacity: 0.7 }]}>{rightLabel}</Text>
+        <Text style={[TEXT.monoSmall, { color: textColor, opacity: 0.7, fontStyle: 'italic' }]}>{rightLabel}</Text>
       )}
     </TouchableOpacity>
   )

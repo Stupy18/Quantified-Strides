@@ -29,7 +29,7 @@ function StepCredentials({ data, onChange, onNext }) {
 
   function submit(e) {
     e.preventDefault()
-    if (!data.gender) { setError('Please select a gender'); return }
+    if (!data.gender) { setError('Please select your biological sex'); return }
     if (data.password.length < 6) { setError('Password must be at least 6 characters'); return }
     if (data.password !== data.confirm) { setError('Passwords do not match'); return }
     setError(null)
@@ -85,10 +85,16 @@ function StepCredentials({ data, onChange, onNext }) {
           className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
       </div>
       <div className="space-y-1">
-        <label className="text-sm font-medium">Gender</label>
+        <label className="text-sm font-medium flex items-center gap-1">
+          Biological sex
+          <span
+            title="Biological sex is used solely for accurate athletic benchmarking; Things like VO2max norms and recovery baselines differ physiologically. It has nothing to do with how you identify."
+            className="text-muted-foreground cursor-help text-xs"
+          >ⓘ</span>
+        </label>
         <select required value={data.gender} onChange={e => onChange('gender', e.target.value)}
           className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
-          <option value="" disabled>Select gender</option>
+          <option value="" disabled>Select biological sex</option>
           {GENDERS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
         </select>
       </div>
