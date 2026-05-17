@@ -1,8 +1,8 @@
 import React from 'react'
-import { TouchableOpacity, Text, View, StyleSheet } from 'react-native'
+import { TouchableOpacity, Text, StyleSheet } from 'react-native'
 import { useCheckInStore } from '../../store/checkInStore'
 import { useTheme } from '../../hooks/useTheme'
-import { RADIUS } from '../../theme'
+import { FONT, SPACE, RADIUS } from '../../theme'
 
 export function CheckInFAB() {
   const theme = useTheme()
@@ -14,41 +14,38 @@ export function CheckInFAB() {
     <TouchableOpacity
       onPress={openModal}
       activeOpacity={0.85}
-      style={[styles.fab, { backgroundColor: theme.accent }]}
+      style={[
+        styles.fab,
+        {
+          backgroundColor: theme.bgAlert,
+          shadowColor:     theme.bgAlert,
+        },
+      ]}
     >
-      <View style={[styles.pulseRing, { borderColor: theme.accent }]} />
-      <Text style={[styles.icon, { color: theme.textOnAccent }]}>✦</Text>
+      <Text style={[styles.label, { color: theme.textOnAlert }]}>Check in ↑</Text>
     </TouchableOpacity>
   )
 }
 
 const styles = StyleSheet.create({
   fab: {
-    position:       'absolute',
-    bottom:         96,
-    right:          20,
-    width:          48,
-    height:         48,
-    borderRadius:   RADIUS.full,
-    alignItems:     'center',
-    justifyContent: 'center',
-    shadowColor:    '#000',
-    shadowOffset:   { width: 0, height: 4 },
-    shadowOpacity:  0.3,
-    shadowRadius:   8,
-    elevation:      8,
-    zIndex:         50,
+    position:          'absolute',
+    bottom:            96,
+    right:             20,
+    paddingVertical:   SPACE.sm + 2,
+    paddingHorizontal: SPACE.lg,
+    borderRadius:      RADIUS.pill,
+    alignItems:        'center',
+    justifyContent:    'center',
+    shadowOffset:      { width: 0, height: 8 },
+    shadowOpacity:     0.35,
+    shadowRadius:      16,
+    elevation:         8,
+    zIndex:            50,
   },
-  pulseRing: {
-    position:     'absolute',
-    width:        60,
-    height:       60,
-    borderRadius: RADIUS.full,
-    borderWidth:  1.5,
-    opacity:      0.3,
-  },
-  icon: {
-    fontSize:   20,
-    lineHeight: 22,
+  label: {
+    fontFamily:    FONT.serifItalic,
+    fontSize:      16,
+    letterSpacing: -0.05,
   },
 })

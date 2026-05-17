@@ -57,7 +57,7 @@ services:
       redis:
         condition: service_started
     env_file:
-      - ./QuantifiedStrides/.env
+      - QuantifiedStrides/.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"
@@ -81,7 +81,7 @@ services:
       backend:
         condition: service_started
     env_file:
-      - ./QuantifiedStrides/.env
+      - QuantifiedStrides/.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"
