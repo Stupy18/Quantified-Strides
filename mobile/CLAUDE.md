@@ -79,7 +79,7 @@ mobile/                    ← git root for this sub-project
         today.tsx          ← placeholder
         load.tsx           ← placeholder
         log.tsx            ← placeholder
-        history.tsx        ← placeholder
+        history.tsx        ← implemented (workout list + infinite pagination + filter chips)
         me.tsx             ← placeholder
 
     assets/
@@ -216,6 +216,12 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
   - Ramp rate indicator
   - Recent workout history list with sport badges (14-day window)
   - Wired to backend via `useTrainingHistory` + `useRecentWorkouts`
+- **History tab** (`app/(tabs)/history.tsx`) — fully implemented with real API data:
+  - Filter chips (All / Run / Strength / MTB / Climb) — client-side filtering over loaded data
+  - 5-item preview with `See all N →` / `Show less` toggle in section header
+  - Cursor-based infinite pagination via `useWorkoutHistoryInfinite` (`useInfiniteQuery`); 90-day windows keyed by `before_date`
+  - Bottom action row: `↑ Show less` (left) + `Load older →` (right, hidden when no more pages); collapsing scrolls to top via `ScreenWrapper` `scrollRef`
+  - Trends section present but placeholder (static sparkline data — no API wired yet)
 - **`BodyFreshnessMap`** (`src/components/blocks/BodyFreshnessMap.tsx`) — fully built:
   - Uses `react-native-body-highlighter` (male, `gender="male"`) for real anatomical SVG paths — front + back figures side by side at `scale=0.5` (each 100×200px)
   - Per-slug freshness coloring: `SLUG_MUSCLES` maps each library slug to our internal muscle keys; freshness drives fill opacity (`accent + toHex(pct)`)
@@ -281,10 +287,9 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
 - Endurance session logger: duration, perceived effort, notes
 - Post-workout reflection form
 
-**History tab:**
-- Filter chips (All / Run / Strength / MTB / Climb)
-- WorkoutListRow list with pagination or infinite scroll
-- Workout detail view (tap to expand)
+**History tab:** Core list built. Remaining:
+- Workout detail view (tap a row to expand/navigate)
+- Trends section wired to real API (`/running/trends`, `/strength/1rm`)
 
 **Me tab:**
 - Profile info (name, email)
@@ -298,7 +303,7 @@ Loaded in `app/_layout.tsx` via `useFonts()`. The app shows nothing until fonts 
 ### API Endpoints (not yet wired)
 
 - `src/api/endpoints/auth.ts` — login, register, verify-email
-- `src/api/endpoints/training.ts` — workout history, training load
+- `src/api/endpoints/training.ts` — partially wired: `fetchTrainingHistory`, `fetchRecentWorkouts`, `fetchWorkoutHistoryPage` exist; strength/sleep/running endpoints still needed
 - `src/api/endpoints/sleep.ts` — sleep history
 - `src/api/endpoints/strength.ts` — sessions, exercises, sets
 - `src/api/endpoints/checkin.ts` — daily readiness + post-workout reflection

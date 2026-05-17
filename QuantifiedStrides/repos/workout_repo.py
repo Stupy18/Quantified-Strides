@@ -15,6 +15,7 @@ class WorkoutRepo:
         user_id: int,
         days: int = 90,
         sport: str | None = None,
+        before_date: date | None = None,
     ):
         query = """
             SELECT
@@ -28,9 +29,15 @@ class WorkoutRepo:
             FROM workouts w
             LEFT JOIN workout_power_summary ps ON ps.workout_id = w.workout_id
             WHERE w.user_id = :user_id
-              AND w.workout_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
         """
         params: dict = {"user_id": user_id, "days": days}
+
+        if before_date:
+            query += " AND w.workout_date < :before_date"
+            query += " AND w.workout_date >= :before_date - (:days * INTERVAL '1 day')"
+            params["before_date"] = before_date
+        else:
+            query += " AND w.workout_date >= CURRENT_DATE - (:days * INTERVAL '1 day')"
 
         if sport:
             query += " AND w.sport = :sport"

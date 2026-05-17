@@ -92,8 +92,9 @@ class TrainingService:
         user_id: int,
         days: int = 90,
         sport: str | None = None,
+        before_date: date | None = None,
     ) -> list[WorkoutListItemSchema]:
-        rows = await repo.list_workouts(user_id, days, sport)
+        rows = await repo.list_workouts(user_id, days, sport, before_date)
         return [
             WorkoutListItemSchema(
                 workout_id=row.workout_id,
