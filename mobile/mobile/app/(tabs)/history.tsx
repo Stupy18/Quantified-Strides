@@ -14,6 +14,8 @@ import { TEXT, SPACE } from '../../src/theme'
 
 // ── Filter config ──────────────────────────────────────────────────────────────
 
+const PREVIEW_COUNT = 5
+
 const FILTERS = ['All', 'Run', 'Strength', 'MTB', 'Climb'] as const
 type Filter = typeof FILTERS[number]
 
@@ -45,6 +47,7 @@ const TRENDS = [
 export default function HistoryScreen() {
   const theme = useTheme()
   const [activeFilter, setActiveFilter] = useState<Filter>('All')
+  const [showAll, setShowAll] = useState(false)
 
   const { data: workouts, isLoading, isError } = useWorkoutHistory(90)
 
@@ -53,6 +56,9 @@ export default function HistoryScreen() {
     if (activeFilter === 'All') return workouts
     return workouts.filter(w => SPORT_FILTER[activeFilter].includes(w.sport))
   }, [workouts, activeFilter])
+
+  const visible = showAll ? filtered : filtered.slice(0, PREVIEW_COUNT)
+  const hasMore = filtered.length > PREVIEW_COUNT
 
   return (
     <ScreenWrapper>
@@ -74,12 +80,17 @@ export default function HistoryScreen() {
             key={f}
             label={f}
             isActive={activeFilter === f}
-            onPress={() => setActiveFilter(f)}
+            onPress={() => { setActiveFilter(f); setShowAll(false) }}
           />
         ))}
       </ScrollView>
 
       {/* ── Workout list ── */}
+      <SectionTitle
+        title="Workouts"
+        rightLabel={hasMore ? (showAll ? 'Show less' : `See all ${filtered.length} →`) : undefined}
+        onRightPress={() => setShowAll(v => !v)}
+      />
       <InfoCard noPadding>
         {isLoading ? (
           <View style={styles.center}>
@@ -98,14 +109,14 @@ export default function HistoryScreen() {
             </Text>
           </View>
         ) : (
-          filtered.map((w, i) => (
+          visible.map((w, i) => (
             <WorkoutListRow
               key={w.workout_id}
               title={workoutTitle(w)}
               subtitle={workoutSubtitle(w)}
               date={formatWorkoutDate(w.workout_date)}
               tag={sportTag(w.sport)}
-              isLast={i === filtered.length - 1}
+              isLast={i === visible.length - 1}
             />
           ))
         )}
