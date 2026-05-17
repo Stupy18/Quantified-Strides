@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { ScreenWrapper } from '../../src/components/layout/ScreenWrapper'
 import { InfoCard } from '../../src/components/blocks/InfoCard'
@@ -46,6 +46,7 @@ const TRENDS = [
 
 export default function HistoryScreen() {
   const theme = useTheme()
+  const scrollRef = useRef<ScrollView>(null)
   const [activeFilter, setActiveFilter] = useState<Filter>('All')
   const [showAll, setShowAll] = useState(false)
 
@@ -68,8 +69,13 @@ export default function HistoryScreen() {
   const visible = showAll ? filtered : filtered.slice(0, PREVIEW_COUNT)
   const hasMore = filtered.length > PREVIEW_COUNT
 
+  const collapse = () => {
+    setShowAll(false)
+    scrollRef.current?.scrollTo({ y: 0, animated: true })
+  }
+
   return (
-    <ScreenWrapper>
+    <ScreenWrapper scrollRef={scrollRef}>
 
       {/* ── Page header ── */}
       <View style={styles.pageHeader}>
@@ -97,7 +103,7 @@ export default function HistoryScreen() {
       <SectionTitle
         title="Workouts"
         rightLabel={hasMore ? (showAll ? 'Show less' : `See all ${filtered.length} →`) : undefined}
-        onRightPress={() => setShowAll(v => !v)}
+        onRightPress={showAll ? collapse : () => setShowAll(true)}
       />
       <InfoCard noPadding>
         {isLoading ? (
@@ -113,7 +119,7 @@ export default function HistoryScreen() {
         ) : filtered.length === 0 ? (
           <View style={styles.center}>
             <Text style={[TEXT.narrativeMedium, { color: theme.textMuted }]}>
-              No {activeFilter === 'All' ? '' : activeFilter.toLowerCase() + ' '}sessions in the last 90 days.
+              No {activeFilter === 'All' ? '' : activeFilter.toLowerCase() + ' '}sessions in the last {(data?.pages.length ?? 1) * 90} days.
             </Text>
           </View>
         ) : (
@@ -142,6 +148,14 @@ export default function HistoryScreen() {
                 Load older →
               </Text>
           }
+        </TouchableOpacity>
+      )}
+
+      {showAll && (
+        <TouchableOpacity style={styles.loadOlder} onPress={collapse}>
+          <Text style={[TEXT.monoSmall, { color: theme.textMuted, textTransform: 'uppercase' }]}>
+            ↑ Show less
+          </Text>
         </TouchableOpacity>
       )}
 

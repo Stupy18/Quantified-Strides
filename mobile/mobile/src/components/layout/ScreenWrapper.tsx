@@ -7,9 +7,10 @@ interface ScreenWrapperProps {
   children: React.ReactNode
   scrollable?: boolean
   style?: ViewStyle
+  scrollRef?: React.RefObject<ScrollView>
 }
 
-export function ScreenWrapper({ children, scrollable = true, style }: ScreenWrapperProps) {
+export function ScreenWrapper({ children, scrollable = true, style, scrollRef }: ScreenWrapperProps) {
   const theme = useTheme()
   const inner = <View style={[styles.inner, style]}>{children}</View>
   return (
@@ -17,6 +18,7 @@ export function ScreenWrapper({ children, scrollable = true, style }: ScreenWrap
       {scrollable
         ? (
           <ScrollView
+            ref={scrollRef}
             style={{ flex: 1 }}
             contentContainerStyle={styles.scroll}
             showsVerticalScrollIndicator={false}
