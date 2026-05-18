@@ -1,6 +1,6 @@
 # Current State — QuantifiedStrides
 
-> **Last updated:** 2026-05-13 (end of session)
+> **Last updated:** 2026-05-19 (end of session)
 > **Active integration branch:** `dev`
 > **Rule:** Update this file at the end of every session. If it's stale, update it before starting work.
 
@@ -10,22 +10,44 @@
 
 | Item | Owner | Branch | Status | Notes |
 |---|---|---|---|---|
+| Mobile — white screen fix | — | dev | Blocked | Bundle compiles. White screen on device. Debug steps in `mobile/CLAUDE.md` → Known Issue. Fix this before adding more mobile features. |
 | Mobile — Today tab | — | dev | Active | Wired to `/dashboard` API. UI built with mock data, API wiring done. Review needed. |
 | Mobile — History tab | — | dev | Active | 90-day workout fetch implemented. |
-| Mobile — white screen fix | — | dev | Blocked | Bundle compiles. White screen on device. Debug steps in `mobile/CLAUDE.md` → Known Issue. |
-| Recommendation engine v2.0 | — | — | Prototype complete, impl not started | Prototype in `notebooks/07_rec_engine_prototype.ipynb`. Spec in `docs/RECOMMENDATION_PROTOCOL.md`. See §13 for build order. |
-| Sleep readiness wiring | — | dev | Spec ready | `compute_sleep_readiness()` validated in notebook 06. Not wired into dashboard yet. |
-| Research notebooks (08–11) | — | research | Not started | See `notebooks/BASELINE_ROADMAP.md` for priority order. |
+| Sleep readiness wiring | — | dev | Spec ready | `compute_sleep_readiness()` validated in notebook 06. Not wired into dashboard yet. Self-contained, high signal — good next task. |
+| Rec engine v2.0 implementation | — | dev | Ready to start | **Start with Story 001 (schema).** Stories on Trello. Wave order: 001 → 002 → 003/007/011 → 004/005 → 006/008–016. Spec: `docs/RECOMMENDATION_PROTOCOL.md`. |
 
 ---
 
 ## Next Up (ordered)
 
-1. **Mobile white screen** — fix before adding more mobile features. Debug steps documented.
-2. **Sleep readiness wiring** — self-contained, data-ready, high signal. Brief in `AGENTS.md`.
-3. **Environmental response baseline** (notebook 08) — priority 1 in `BASELINE_ROADMAP.md`. Unblocks running economy trend.
-4. **Plan-to-actual feedback loop** — prerequisite for all new signals in `recommend.py`. See `BASELINE_ROADMAP.md` §1 (Council Findings).
-5. **Recommendation engine v2.0 implementation** — prototype validated; implementation start after plan-to-actual loop is live.
+1. **Mobile white screen** — fix before adding more mobile features. Debug steps in `mobile/CLAUDE.md`.
+2. **Sleep readiness wiring** — self-contained, data-ready, no blockers. Brief in `AGENTS.md`.
+3. **Rec engine v2.0 — Story 001 (schema)** — 18 new tables, 4 ALTER TABLE extensions. Flyway migrations V006+. Story on `research` branch: `docs/user-stories/001.rec-engine-schema-foundation.md`. All downstream stories depend on this.
+
+---
+
+## Rec Engine v2.0 — Story Dependency Waves
+
+Planning complete. Dev team owns implementation. Stories are on Trello.
+
+| Wave | Stories | Status |
+|---|---|---|
+| 1 | 001 — Schema foundation | **Start here — unblocked** |
+| 2 | 002 — Signal computation | After 001 |
+| 3 | 003, 007, 011 — Safety gates, competition calendar, background jobs | After 002 |
+| 4 | 004, 005 — Daily rec engine, CSP solver | After 003 |
+| 5 | 006, 008, 009, 010 — Running Rx, plan generator, injury mgmt, female athlete protocol | After 004/005 |
+| UI | 012–016 — Dashboard surface | After 004 (typed DailyRecommendation model) |
+
+---
+
+## Strategic Roadmap — Post Rec Engine
+
+Epics in order after rec engine ships:
+
+1. **Onboarding** — Questionnaire, first-sync experience, cold-start UX. Phase 1 GTM gate. (PM stories to be written.)
+2. **Longitudinal analytics** — 1RM progression, VO2max trend, running economy over time. Retention driver. (PM stories to be written.)
+3. **Narrative upgrade** — Personal journal RAG over `workout_reflection` entries. Phase 2 personalization.
 
 ---
 
@@ -33,42 +55,33 @@
 
 | Item | Blocked by |
 |---|---|
-| Running economy trend (notebook) | Environmental response baseline must come first |
-| New signals wired into `recommend.py` | Plan-to-actual feedback loop not live |
-| Zone calibration drift as hard modifier | 6+ months road data + plan-to-actual loop |
-| ACWR personal safety zone | Injury tracking implementation + 12+ months data |
+| Mobile feature work (beyond Today/History) | White screen fix |
+| Rec engine stories 002+ | Story 001 (schema) deployed |
+| Dashboard UI stories 012–016 | Story 004 (DailyRecommendation typed model) |
+| Notebooks 09–11 (data science) | Notebook 08 completion + ≥200 matched HRV × check-in rows |
+
+---
+
+## Data Science — Next Up
+
+| Task | Status |
+|---|---|
+| Notebook 08 — Daily readiness missingness audit | Not started — unblocked |
+| Onboarding questionnaire spec (6 fields → prior JSON) | Not started — needed before onboarding epic |
+| Video transcript ingestion into `knowledge/` | Not started — content work, no dev needed |
 
 ---
 
 ## Recently Completed
 
-- **Notebook 07 — Recommendation engine prototype** — full runnable prototype of `RECOMMENDATION_PROTOCOL.md`. All 12 pipeline scenarios passing. Key validated design decisions:
-  - Per-athlete HRV baseline stored in `user_profile` (`hrv_baseline_mean`, `hrv_baseline_sd`) — never rolling window
-  - `establish_hrv_baseline()` filters to post-rest/easy readings (`preceding_trimp ≤ 50` or `None`) — continuous accumulation, no dedicated baseline week needed
-  - `normalise_readiness()` converts 1-10 DB scale → 1-5 before aggregate formula
-  - Short sleep hard cap: `< 6h sleep` cannot produce `'high'` readiness regardless of score ratio
-  - `strength_block.timing`: `'after_run_3h_min'` or `'anytime'` based on aerobic sessions today
-- **`docs/RECOMMENDATION_PROTOCOL.md` fully synced** — §3.4 updated to `preceding_trimp`-filtered baseline design; schema comments updated; all spec gaps closed
-- **Mobile: Story cards** — 10 animated ephemeral cards, Today tab, Stories screen (24h TTL, no archive — disappearance is intentional product design)
-- `docs/RECOMMENDATION_PROTOCOL.md` v2.0 — full engineering spec
-- Sleep baseline notebook 06 — `compute_sleep_readiness()` validated
-- Mobile: Me tab revamp + multi-sport selection screen
-- Mobile: Load tab fully wired (ATL/CTL/TSB chart, ramp rate, workout history)
-- Mobile: BodyFreshnessMap (camera-zoom, anatomical SVG, per-muscle freshness)
-- Mobile: Today tab wired to `/dashboard` API
-- Operating protocol: `PROTOCOL.md`, `CURRENT.md`, `WORKFLOW.md`, `AGENTS.md`, `TEAM_GUIDE.md`, `.claude/settings.json` (hooks) — committed to dev
-- Notion wiki: 15+ pages built via API (Onboarding, Product, Research, Meetings, Operations)
-
----
-
-## Open Decisions Needed
-
-- **Who owns rec engine v2.0 implementation?** Assign before next sprint.
-- **Mobile priority:** fix white screen now, or continue building tabs in parallel?
-- **3 open spec questions (non-blocking):**
-  - Q1: `LOAD_PCT` rest row — document source formula
-  - Q2: Sport selection design decision (algorithmic vs bandit)
-  - Q3: Confidence score formal definition
+- **Rec engine v2.0 — full planning epic** — Stories 001–016 written and on Trello. Spec: `docs/RECOMMENDATION_PROTOCOL.md`.
+- **Notebook 07 — Recommendation engine prototype** — All 12 pipeline scenarios passing. Key decisions: per-athlete HRV baseline in `user_profile`, `establish_hrv_baseline()` filters to post-rest/easy readings, short sleep hard cap (`< 6h → cannot produce 'high' readiness`).
+- **`docs/RECOMMENDATION_PROTOCOL.md` v2.0** — Full engineering spec.
+- **Mobile: Story cards** — 10 animated ephemeral cards, 24h TTL, Today tab wired.
+- **Mobile: Load tab** — ATL/CTL/TSB chart, ramp rate, workout history, all wired to real API.
+- **Mobile: BodyFreshnessMap** — Camera-zoom, anatomical SVG, per-muscle freshness coloring.
+- **Sleep baseline (notebook 06)** — `compute_sleep_readiness()` validated.
+- **Operating protocol** — `PROTOCOL.md`, `WORKFLOW.md`, `AGENTS.md`, `TEAM_GUIDE.md` committed to dev.
 
 ---
 
@@ -77,5 +90,5 @@
 | Branch | Purpose | Last active |
 |---|---|---|
 | `dev` | Integration — all feature PRs target here | Active |
-| `research` | Data science notebooks | Active — notebook 07 committed 2026-05-13 |
+| `research` | Data science notebooks + planning artifacts | Active — rec engine stories committed 2026-05-19 |
 | `main` | Production-ready | Stable |
