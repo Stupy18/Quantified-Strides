@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '\n--- SESSION END CHECKLIST ---\n1. Update CURRENT.md (move completed items, update blockers, set what is next)\n2. If any algorithm changed -> update docs/DECISIONS.md with the WHY\n3. If any schema changed -> confirm new Flyway migration exists\n4. If agent was corrected -> save a feedback memory\n------------------------------'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport sys, json, subprocess\ntry:\n    data = json.load(sys.stdin)\n    path = data.get('tool_input', {}).get('file_path', '')\n    if 'db/flyway' in path and path.endswith('.sql'):\n        result = subprocess.run(['git', 'log', '--oneline', '-1', '--', path], capture_output=True, text=True, cwd='/mnt/c/Users/vasiu/UBB/Quantified-Strides')\n        if result.stdout.strip():\n            print(f'WARNING: {path} is a committed Flyway migration. Editing it breaks the stack for everyone. Create a new V{{N}}__description.sql instead.', file=sys.stderr)\nexcept:\n    pass\n\""
+          }
+        ]
+      }
+    ]
+  }
+}
