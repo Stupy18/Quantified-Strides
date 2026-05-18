@@ -271,7 +271,6 @@ for d in gym_days:
     cur.execute("""
         INSERT INTO strength_sessions (user_id, session_date, session_type)
         VALUES (%s, %s, %s)
-        ON CONFLICT (user_id, session_date) DO NOTHING
         RETURNING session_id
     """, (USER_ID, d, session_type))
     result = cur.fetchone()
@@ -353,7 +352,7 @@ for d, wid in workout_ids.items():
         INSERT INTO workout_reflection (
             user_id, entry_date, workout_id, session_rpe, session_quality, load_feel, notes
         ) VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (user_id, entry_date) DO NOTHING
+        ON CONFLICT (user_id, entry_date) WHERE session_id IS NULL DO NOTHING
     """, (
         USER_ID, d, wid,
         randi(5, 9),

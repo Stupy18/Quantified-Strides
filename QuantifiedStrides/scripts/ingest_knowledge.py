@@ -16,7 +16,7 @@ from pathlib import Path
 
 import psycopg2
 from psycopg2.extras import execute_values
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
 
@@ -24,7 +24,7 @@ SCIENCE_DIR = Path(__file__).parent / "Science"
 CHUNK_SIZE  = 300   # approximate tokens per chunk (words * ~1.3)
 CHUNK_OVERLAP = 30  # words of overlap between chunks
 
-MODEL_NAME = "all-MiniLM-L6-v2"  # 384-dim, fast, good for semantic search
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # 384-dim, fast, good for semantic search
 
 # ── title inference from filename ────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ def chunk_text(text: str, chunk_words: int = CHUNK_SIZE, overlap: int = CHUNK_OV
 
 def main(clear: bool = False):
     print(f"Loading model {MODEL_NAME}…")
-    model = SentenceTransformer(MODEL_NAME)
+    model = TextEmbedding(MODEL_NAME)
 
     conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD)
     cur  = conn.cursor()
@@ -79,7 +79,7 @@ def main(clear: bool = False):
 
         print(f"{path.name}: {len(chunks)} chunks", end="", flush=True)
 
-        embeddings = model.encode(chunks, show_progress_bar=False, normalize_embeddings=True)
+        embeddings = list(model.embed(chunks))
 
         rows = [
             (str(path.name), title, idx, chunk, embedding.tolist())
