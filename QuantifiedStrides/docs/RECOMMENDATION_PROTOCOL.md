@@ -13,7 +13,8 @@ Cycle-phase content is performance optimisation framing only.
 
 ```
 STANDARD_DISCLAIMER = (
-  "This is a training load suggestion based on your personal data. "
+  "This is a training load su
+  ggestion based on your personal data. "
   "It is not medical advice. If you experience pain, illness, or unusual "
   "fatigue, consult a qualified healthcare provider before training."
 )

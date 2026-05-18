@@ -5,7 +5,8 @@
       "Bash(npx tsc *)",
       "Bash(echo \"exit: $?\")",
       "Bash(npm install *)",
-      "Bash(Remove-Item *)"
+      "Bash(Remove-Item *)",
+      "Bash(git checkout *)"
     ]
   }
 }
