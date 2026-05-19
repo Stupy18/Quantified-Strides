@@ -15,7 +15,7 @@
 | Mobile — History tab | — | dev | Active | 90-day workout fetch implemented. |
 | Sleep readiness wiring | — | dev | Spec ready | `compute_sleep_readiness()` validated in notebook 06. Not wired into dashboard yet. Self-contained, high signal — good next task. |
 | Rec engine v2.0 — Story 001 schema | — | `feature/rec-engine-schema-foundation` | PR open | V006/V007/V008 validated (Flyway exits 0, all 18 tables present, seeds correct, trigger + index verified). PR → `dev` open, awaiting review. |
-| **Rec engine v2.0 — Story 002 signal computation** | — | `feature/002.signal-computation-layer` | **In progress — 44/46 tasks** | All compute logic implemented. 2 tasks need live DB verification (training_load_daily upsert after sync, dashboard latency). Ready to commit. **Blocked by: Story 001 must merge first** (V006–V008 add the columns this code writes to). |
+| **Rec engine v2.0 — Story 002 signal computation** | — | `feature/002.signal-computation-layer` | **PR open** | All compute logic implemented and committed. 2 tasks need live DB verification after Story 001 merges (training_load_daily upsert, dashboard latency). **Do not merge before Story 001.** |
 
 ---
 
