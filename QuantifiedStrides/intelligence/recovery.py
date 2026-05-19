@@ -24,7 +24,9 @@ moves continuously as the session recedes into the past.
 """
 
 import math
+import statistics
 from datetime import datetime, timedelta, time as dtime
+from itertools import takewhile
 
 from repos.sleep_repo import SleepRepo
 from repos.strength_repo import StrengthRepo
@@ -32,8 +34,78 @@ from repos.workout_repo import WorkoutRepo
 
 
 # ---------------------------------------------------------------------------
-# HRV trend
+# HRV baseline (stored per-athlete)
 # ---------------------------------------------------------------------------
+
+def establish_hrv_baseline(
+    hrv_series: list[float],
+    preceding_trimp: list[float | None],
+    easy_threshold: float = 50.0,  # HEURISTIC — ≈ 60–70 min easy Z2
+    min_clean: int = 14,            # HEURISTIC — minimum clean readings
+) -> tuple[float, float] | None:
+    """
+    Compute per-athlete HRV baseline from clean (post-rest/easy) readings only.
+    A reading is clean when the preceding day's TRIMP is None (rest) or ≤ easy_threshold.
+    Returns (mean, sd) rounded to 2dp, or None if < min_clean readings qualify.
+    Returns None if sd < 0.5 ms (baseline not meaningfully established).
+    """
+    if len(hrv_series) != len(preceding_trimp):
+        return None
+    clean = [h for h, t in zip(hrv_series, preceding_trimp)
+             if t is None or t <= easy_threshold]
+    if len(clean) < min_clean:
+        return None
+    m = statistics.mean(clean)
+    s = statistics.stdev(clean) if len(clean) > 1 else 0.0
+    return (round(m, 2), round(s, 2)) if s >= 0.5 else None
+
+
+def compute_hrv_status(
+    hrv_series: list[float],
+    personal_mean: float | None,
+    personal_sd: float | None,
+) -> dict:
+    """
+    Compare today's HRV against the stored per-athlete baseline.
+
+    Returns dict with:
+        status               : 'elevated' | 'normal' | 'suppressed' | 'very_suppressed' | 'no_data'
+        z                    : z-score (float) or None
+        consecutive_suppressed: count of immediately preceding suppressed nights (z < -1.0)
+        last_hrv             : most recent HRV reading
+    """
+    if (len(hrv_series) < 2
+            or personal_mean is None
+            or personal_sd is None
+            or personal_sd < 0.5):
+        return {
+            "status": "no_data",
+            "z": None,
+            "consecutive_suppressed": 0,
+            "last_hrv": hrv_series[-1] if hrv_series else None,
+        }
+
+    z = (hrv_series[-1] - personal_mean) / personal_sd
+
+    status = (
+        "elevated"       if z >  1.0 else
+        "normal"         if z > -1.0 else
+        "suppressed"     if z > -1.5 else
+        "very_suppressed"
+    )
+
+    consec = sum(1 for _ in takewhile(
+        lambda v: (v - personal_mean) / personal_sd < -1.0,
+        reversed(hrv_series[:-1]),
+    ))
+
+    return {
+        "status": status,
+        "z": round(z, 2),
+        "consecutive_suppressed": consec,
+        "last_hrv": round(hrv_series[-1], 1),
+    }
+
 
 async def get_hrv_status(
     sleep_repo: SleepRepo,
@@ -42,7 +114,8 @@ async def get_hrv_status(
     user_id: int = 1,
 ) -> dict:
     """
-    Compare today's HRV against a rolling personal baseline.
+    Legacy: compare today's HRV against a rolling personal baseline.
+    Used by RecoveryService until it is updated to use compute_hrv_status() + stored baseline.
 
     Returns a dict:
         baseline   : rolling mean HRV over last `window` days (excl. today)

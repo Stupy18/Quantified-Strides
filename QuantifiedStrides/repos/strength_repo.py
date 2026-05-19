@@ -216,6 +216,28 @@ class StrengthRepo:
             {"exercise_id": exercise_id, **data},
         )
 
+    async def get_session_pattern_fatigue(self, session_id: int) -> list:
+        """
+        Returns per-pattern fatigue units for a session.
+        fatigue_units = sum of (cns_cost + local_fatigue_cost) across all sets for each pattern.
+        Only exercises with a resolved exercise_ref_id and primary_pattern are included.
+        """
+        result = await self.db.execute(
+            text("""
+                SELECT
+                    e.primary_pattern AS pattern_key,
+                    SUM(e.cns_cost + e.local_fatigue_cost) * COUNT(st.set_id) AS fatigue_units
+                FROM strength_exercises se
+                JOIN exercises e ON e.exercise_id = se.exercise_ref_id
+                JOIN strength_sets st ON st.exercise_id = se.exercise_id
+                WHERE se.session_id = :sid
+                  AND e.primary_pattern IS NOT NULL
+                GROUP BY e.primary_pattern
+            """),
+            {"sid": session_id},
+        )
+        return result.fetchall()
+
     # ── 1RM + tracking ─────────────────────────────────────────────────────────
 
     async def get_1rm_history(self, user_id: int, exercise_name: str, days: int = 365):

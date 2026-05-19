@@ -422,6 +422,85 @@ class WorkoutRepo:
             },
         )
 
+    # ── signal writes ─────────────────────────────────────────────────────────
+
+    async def get_trimp_series(self, user_id: int, start_date, end_date) -> list[tuple]:
+        """Returns list of (date, trimp) tuples for workouts with non-NULL trimp."""
+        result = await self.db.execute(
+            text("""
+                SELECT workout_date, trimp
+                FROM workouts
+                WHERE user_id = :uid
+                  AND workout_date BETWEEN :start AND :end
+                  AND trimp IS NOT NULL
+                ORDER BY workout_date
+            """),
+            {"uid": user_id, "start": start_date, "end": end_date},
+        )
+        return [(row.workout_date, float(row.trimp)) for row in result.fetchall()]
+
+    async def upsert_trimp(self, workout_id: int, trimp: float) -> None:
+        await self.db.execute(
+            text("UPDATE workouts SET trimp = :trimp WHERE workout_id = :wid"),
+            {"trimp": trimp, "wid": workout_id},
+        )
+
+    async def upsert_hr_stability(self, workout_id: int, value: float | None) -> None:
+        await self.db.execute(
+            text("UPDATE workouts SET hr_stability_last_10min = :val WHERE workout_id = :wid"),
+            {"val": value, "wid": workout_id},
+        )
+
+    async def upsert_fatigue_index(self, workout_id: int, value: float | None) -> None:
+        await self.db.execute(
+            text("UPDATE workouts SET fatigue_index = :val WHERE workout_id = :wid"),
+            {"val": value, "wid": workout_id},
+        )
+
+    async def upsert_terrain_type(self, workout_id: int, terrain_type: str | None) -> None:
+        await self.db.execute(
+            text("UPDATE workouts SET terrain_type = :val WHERE workout_id = :wid"),
+            {"val": terrain_type, "wid": workout_id},
+        )
+
+    async def get_running_workouts_for_signal_compute(self, user_id: int, since_date) -> list:
+        """Running workouts with all signal columns for post-sync computation and assembly."""
+        result = await self.db.execute(
+            text("""
+                SELECT workout_id, workout_date, sport,
+                       avg_heart_rate, max_heart_rate,
+                       EXTRACT(EPOCH FROM (end_time - start_time)) / 60.0 AS duration_min,
+                       terrain_type,
+                       fatigue_index,
+                       hr_stability_last_10min
+                FROM workouts
+                WHERE user_id = :uid
+                  AND workout_date >= :since
+                  AND sport IN ('running', 'trail_running')
+                ORDER BY workout_date
+            """),
+            {"uid": user_id, "since": since_date},
+        )
+        return result.fetchall()
+
+    async def get_recent_workout_for_trimp(self, user_id: int, since_date) -> list:
+        """All workouts since date with HR data for TRIMP computation."""
+        result = await self.db.execute(
+            text("""
+                SELECT workout_id, workout_date, sport,
+                       avg_heart_rate, max_heart_rate,
+                       EXTRACT(EPOCH FROM (end_time - start_time)) / 60.0 AS duration_min
+                FROM workouts
+                WHERE user_id = :uid
+                  AND workout_date >= :since
+                  AND avg_heart_rate IS NOT NULL
+                  AND trimp IS NULL
+                ORDER BY workout_date
+            """),
+            {"uid": user_id, "since": since_date},
+        )
+        return result.fetchall()
+
     async def upsert_power_summary(self, workout_id: int, data: dict) -> None:
         """Insert or update power/TSS summary for a workout."""
         if not any(data.values()):

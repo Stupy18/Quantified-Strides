@@ -8,7 +8,9 @@ CLI entry point has moved to cli/ — this module is the async API path only.
 """
 
 import json
-from datetime import timedelta
+import math
+import statistics
+from datetime import datetime, timedelta
 
 from intelligence.training_load import tsb_intensity_hint
 from intelligence.recovery import get_muscle_freshness
@@ -70,6 +72,81 @@ ATHLETE_SPORTS = {
     "ski":       2,
     "snowboard": 1,
 }
+
+
+# ---------------------------------------------------------------------------
+# Pattern fatigue residuals
+# ---------------------------------------------------------------------------
+
+# Minimum ledger session entries before switching from cold-start to decay model.
+_COLD_START_THRESHOLD = 5  # HEURISTIC — below this, approximate from muscle freshness
+
+
+def compute_pattern_fatigue_residuals(
+    ledger_rows: list,          # rows from recommendation_repo.get_pattern_fatigue_ledger()
+    movement_patterns: dict,    # {pattern_key: fatigue_decay_tau_h}
+    entry_counts: dict,         # {pattern_key: session_count}
+    muscle_freshness: dict,     # {muscle: freshness_score} for cold-start fallback
+    pattern_primary_muscles: dict | None = None,  # {pattern_key: [muscle, ...]} optional
+    now: datetime | None = None,
+) -> dict[str, float]:
+    """
+    Compute residual fatigue per movement pattern.
+
+    For patterns with ≥ _COLD_START_THRESHOLD ledger entries: exponential decay.
+    For patterns below threshold: approximate from muscle_freshness map.
+    # HEURISTIC: cold-start formula (1 − mean(freshness)) × 3.0 maps muscle freshness
+    # to a pattern residual unit; calibrate the 3.0 multiplier per-athlete over time.
+
+    Returns dict with all 9 pattern keys present; missing/zero = 0.0.
+    """
+    if now is None:
+        now = datetime.utcnow()
+
+    # Default primary muscle groups per movement pattern for cold-start
+    _DEFAULT_PATTERN_MUSCLES: dict[str, list[str]] = {
+        "POWER_FULL_BODY":  ["quads", "glutes", "hamstrings", "lower_back"],
+        "HIP_HINGE":        ["hamstrings", "glutes", "lower_back"],
+        "KNEE_DOMINANT":    ["quads", "glutes", "calves"],
+        "HORIZONTAL_PUSH":  ["chest", "front_delt", "triceps"],
+        "HORIZONTAL_PULL":  ["lats", "rhomboids", "biceps"],
+        "VERTICAL_PUSH":    ["front_delt", "side_delt", "triceps"],
+        "VERTICAL_PULL":    ["lats", "upper_back", "biceps"],
+        "CARRY_BRACE":      ["core", "traps", "forearms"],
+        "ISOLATION":        ["biceps", "triceps", "calves"],
+    }
+    muscle_map = pattern_primary_muscles or _DEFAULT_PATTERN_MUSCLES
+
+    all_patterns = list(movement_patterns.keys())
+    residuals: dict[str, float] = {p: 0.0 for p in all_patterns}
+
+    # Group ledger rows by pattern
+    ledger_by_pattern: dict[str, list] = {p: [] for p in all_patterns}
+    for row in ledger_rows:
+        if row.pattern_key in ledger_by_pattern:
+            ledger_by_pattern[row.pattern_key].append(row)
+
+    for pattern_key in all_patterns:
+        count = entry_counts.get(pattern_key, 0)
+        tau_h = movement_patterns.get(pattern_key, 48.0)
+
+        if count >= _COLD_START_THRESHOLD:
+            # Exponential decay from ledger
+            residual = 0.0
+            for row in ledger_by_pattern[pattern_key]:
+                session_dt = datetime.combine(row.session_date, datetime.min.time())
+                elapsed_h = (now - session_dt).total_seconds() / 3600.0
+                residual += float(row.fatigue_units) * math.exp(-elapsed_h / max(tau_h, 1.0))
+            residuals[pattern_key] = round(residual, 4)
+        else:
+            # Cold-start: approximate from muscle freshness  # HEURISTIC
+            muscles = muscle_map.get(pattern_key, [])
+            freshness_vals = [muscle_freshness.get(m) for m in muscles if m in muscle_freshness]
+            if freshness_vals:
+                mean_freshness = statistics.mean(freshness_vals)
+                residuals[pattern_key] = round((1.0 - mean_freshness) * 3.0, 4)
+
+    return residuals
 
 
 # ---------------------------------------------------------------------------

@@ -13,11 +13,96 @@ TSB interpretation:
   < -15   : overreached — back off, risk of injury / illness
 """
 
-from datetime import timedelta
+import math
+from datetime import date, timedelta
 
 from repos.workout_repo import WorkoutRepo
 from repos.strength_repo import StrengthRepo
 from repos.sleep_repo import SleepRepo
+
+
+# ---------------------------------------------------------------------------
+# Banister TRIMP (per workout)
+# ---------------------------------------------------------------------------
+
+def compute_trimp(
+    duration_min: float,
+    avg_hr: float,
+    resting_hr: float,
+    max_hr: float,
+    sex: str,  # 'male' | 'female' | 'prefer_not_to_say'
+) -> float:
+    """
+    Banister sex-specific TRIMP formula.  [1] Banister 1991.
+    HRr = heart-rate reserve fraction, clamped to [0, 1].
+    # HEURISTIC: k and y coefficients from Banister 1991; may require per-athlete calibration.
+    """
+    HRr = (avg_hr - resting_hr) / max(max_hr - resting_hr, 1.0)
+    HRr = max(0.0, min(1.0, HRr))
+    k, y = (0.86, 1.67) if sex == "female" else (0.64, 1.92)
+    return duration_min * HRr * k * math.exp(y * HRr)
+
+
+# ---------------------------------------------------------------------------
+# Precomputed daily load (post-sync)
+# ---------------------------------------------------------------------------
+
+def compute_load_metrics(
+    trimp_series: list[tuple],  # [(date, trimp), ...] sorted asc
+    today: date,
+) -> dict:
+    """
+    Compute ATL/CTL/TSB/ACWR/ramp_rate from a pre-filtered TRIMP series.
+
+    trimp_series: list of (date, trimp) from workout_repo.get_trimp_series().
+    Returns zeros/Nones when insufficient data.
+
+    TAU_ATL = 7, TAU_CTL = 42  # HEURISTIC — Morton et al. 1990 [2]
+    """
+    TAU_ATL = 7.0  # HEURISTIC
+    TAU_CTL = 42.0  # HEURISTIC
+    MIN_SESSIONS = 3
+
+    if len(trimp_series) < MIN_SESSIONS:
+        return {"atl": 0.0, "ctl": 0.0, "tsb": 0.0, "acwr": None, "ramp_rate": None}
+
+    atl = ctl = 0.0
+    prev_date = trimp_series[0][0]
+    ctl_14d_ago = None
+    cutoff_14d = today - timedelta(days=14)
+
+    for session_date, trimp in trimp_series:
+        gap = (session_date - prev_date).days
+        if gap > 0:
+            atl = atl * math.exp(-gap / TAU_ATL)
+            ctl = ctl * math.exp(-gap / TAU_CTL)
+        atl += trimp * (1 - math.exp(-1 / TAU_ATL))
+        ctl += trimp * (1 - math.exp(-1 / TAU_CTL))
+        if session_date <= cutoff_14d:
+            ctl_14d_ago = ctl
+        prev_date = session_date
+
+    # Decay forward from last session to today
+    gap_to_today = (today - prev_date).days
+    if gap_to_today > 0:
+        atl = atl * math.exp(-gap_to_today / TAU_ATL)
+        ctl = ctl * math.exp(-gap_to_today / TAU_CTL)
+
+    tsb = ctl - atl
+    acwr = round(atl / ctl, 3) if ctl >= 1.0 else None
+    ramp_rate = (
+        round(((ctl - ctl_14d_ago) / max(ctl_14d_ago, 1.0)) * 100, 1)
+        if ctl_14d_ago is not None
+        else None
+    )
+
+    return {
+        "atl": round(atl, 1),
+        "ctl": round(ctl, 1),
+        "tsb": round(tsb, 1),
+        "acwr": acwr,
+        "ramp_rate": ramp_rate,
+    }
 
 
 # ---------------------------------------------------------------------------

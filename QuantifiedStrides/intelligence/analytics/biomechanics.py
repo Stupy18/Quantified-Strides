@@ -25,10 +25,93 @@ Biomechanics analytics computed from workout_metrics time-series.
 
 from __future__ import annotations
 
+import math
+import statistics
 from typing import Optional
 
 from repos.workout_metrics_repo import WorkoutMetricsRepo
 from repos.workout_repo import WorkoutRepo
+
+
+# ---------------------------------------------------------------------------
+# Post-sync signal computation functions
+# ---------------------------------------------------------------------------
+
+def compute_hr_stability(hr_series: list[int | float]) -> float | None:
+    """
+    Coefficient of variation of HR in the final 10 min of a session.
+    Returns None when fewer than 10 readings are available.
+    CV < 0.05 qualifies the run for zone-speed calibration.
+    """
+    if len(hr_series) < 10:
+        return None
+    mean_hr = statistics.mean(hr_series)
+    if mean_hr <= 0:
+        return None
+    return statistics.stdev(hr_series) / mean_hr
+
+
+def classify_terrain(gradient_series: list[float | None]) -> str | None:
+    """
+    Classify running terrain as 'road' or 'trail' from gradient_pct readings.
+    Returns None when fewer than 10 non-NULL readings are available.
+    Trail threshold: mean absolute gradient > 3% or stdev > 4%.
+    """
+    vals = [g for g in gradient_series if g is not None]
+    if len(vals) < 10:
+        return None
+    mean_abs = statistics.mean(abs(g) for g in vals)
+    stdev_g = statistics.stdev(vals) if len(vals) > 1 else 0.0
+    return "trail" if mean_abs > 3.0 or stdev_g > 4.0 else "road"
+
+
+def compute_fatigue_index(
+    avg_cadence: float | None,
+    avg_gct_ms: float | None,
+    avg_vertical_ratio: float | None,
+    baseline_row,  # row from biomechanics_baselines
+) -> float | None:
+    """
+    Weighted deviation of cadence (50%), GCT (30%), vertical ratio (20%)
+    from per-athlete terrain-specific baselines.
+    Returns None when any required baseline value is missing.
+    Weights are HEURISTIC — calibrate per-athlete after ≥ 20 sessions.
+    """
+    # HEURISTIC: cadence 50%, GCT 30%, vertical_ratio 20%
+    CADENCE_WEIGHT = 0.50
+    GCT_WEIGHT = 0.30
+    VR_WEIGHT = 0.20
+
+    if baseline_row is None:
+        return None
+
+    score = 0.0
+    weight_used = 0.0
+
+    # Cadence: use linear baseline (expected = slope * speed + intercept)
+    # When speed unknown, use mean-based deviation via cadence_r2 availability
+    if avg_cadence is not None and baseline_row.gct_mean_ms is not None:
+        # Approximate expected cadence via inverse GCT relationship
+        expected_cadence = 60000.0 / max(baseline_row.gct_mean_ms, 1.0)
+        if expected_cadence > 0:
+            score += CADENCE_WEIGHT * abs(avg_cadence - expected_cadence) / expected_cadence
+            weight_used += CADENCE_WEIGHT
+
+    if avg_gct_ms is not None and baseline_row.gct_mean_ms is not None and baseline_row.gct_sd_ms:
+        z = (avg_gct_ms - baseline_row.gct_mean_ms) / max(baseline_row.gct_sd_ms, 1.0)
+        score += GCT_WEIGHT * max(0.0, z)  # positive z = worse (longer GCT = more fatigue)
+        weight_used += GCT_WEIGHT
+
+    if (avg_vertical_ratio is not None
+            and baseline_row.vertical_ratio_mean is not None
+            and baseline_row.vertical_ratio_sd):
+        z = (avg_vertical_ratio - baseline_row.vertical_ratio_mean) / max(baseline_row.vertical_ratio_sd, 0.1)
+        score += VR_WEIGHT * max(0.0, z)  # positive z = worse
+        weight_used += VR_WEIGHT
+
+    if weight_used < 0.1:
+        return None
+    return round(score / weight_used, 4)
 
 
 # ---------------------------------------------------------------------------
