@@ -36,11 +36,11 @@
 
 ## 4. Validation
 
-- [ ] 4.1 Run `docker compose down -v && docker compose up -d` — confirm Flyway service exits 0 on a fresh database
-- [ ] 4.2 Run `docker compose up -d` on an existing V005 database — confirm Flyway service exits 0 and no existing rows are affected
-- [ ] 4.3 Confirm `SELECT COUNT(*) FROM movement_patterns` returns 9
-- [ ] 4.4 Confirm `SELECT COUNT(*) FROM strength_phase_catalog` returns 4 and all four `phase_key` values are present
-- [ ] 4.5 Confirm `trg_plan_session_templates_parity` trigger is active: attempt a parity-conflicting insert and confirm exception is raised
-- [ ] 4.6 Confirm `training_plans_one_active_per_user` index is present: attempt two active plan inserts for the same user and confirm unique constraint violation
-- [ ] 4.7 Confirm all 18 new tables exist via `\dt` or information_schema query
-- [ ] 4.8 Confirm re-running `docker compose up -d` on an already-migrated DB passes Flyway checksum validation (exits 0, no re-apply)
+- [x] 4.1 Run `docker compose down -v && docker compose up -d` — confirm Flyway service exits 0 on a fresh database
+- [x] 4.2 Run `docker compose up -d` on an existing V005 database — confirm Flyway service exits 0 and no existing rows are affected
+- [x] 4.3 Confirm `SELECT COUNT(*) FROM movement_patterns` returns 9
+- [x] 4.4 Confirm `SELECT COUNT(*) FROM strength_phase_catalog` returns 4 and all four `phase_key` values are present
+- [x] 4.5 Confirm `trg_plan_session_templates_parity` trigger is active: attempt a parity-conflicting insert and confirm exception is raised
+- [x] 4.6 Confirm `training_plans_one_active_per_user` index is present: attempt two active plan inserts for the same user and confirm unique constraint violation
+- [x] 4.7 Confirm all 18 new tables exist via `\dt` or information_schema query
+- [x] 4.8 Confirm re-running `docker compose up -d` on an already-migrated DB passes Flyway checksum validation (exits 0, no re-apply)
