@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QS Mobile — A & B</title>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500;1,6..72,600&family=Geist:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
+  html,body{margin:0;padding:0;background:#0c0c0e;font-family:'Geist',system-ui,sans-serif;}
+  body{min-height:100vh;display:flex;flex-direction:column;align-items:center;}
+
+  /* ── OUTER CHROME ── */
+  .app-wrap{
+    max-width:1120px;width:100%;padding:40px 24px 80px;
+    display:flex;flex-direction:column;align-items:center;gap:36px;
+  }
+  .app-header{text-align:center;}
+  .app-header h1{
+    margin:0 0 6px;
+    font-family:'Newsreader',serif;font-weight:400;font-size:32px;
+    letter-spacing:-0.015em;color:#f0ede6;
+  }
+  .app-header h1 em{font-style:italic;color:#dfba7a;}
+  .app-header p{margin:0;font-family:'JetBrains Mono',monospace;font-size:10.5px;
+    letter-spacing:0.18em;text-transform:uppercase;color:#555;}
+
+  /* Screen switcher */
+  .switcher{
+    display:flex;gap:4px;
+    background:#18181a;border:1px solid #2a2a2e;border-radius:12px;padding:4px;
+  }
+  .switcher button{
+    background:transparent;border:none;
+    font-family:'JetBrains Mono',monospace;font-size:11px;
+    letter-spacing:0.14em;text-transform:uppercase;
+    color:#555;padding:8px 18px;border-radius:8px;cursor:pointer;
+    transition:background 120ms,color 120ms;
+  }
+  .switcher button.on{background:#f0ede6;color:#0c0c0e;}
+  .switcher button:hover:not(.on){color:#aaa;}
+
+  /* Two-up phones */
+  .phones{display:flex;gap:48px;align-items:flex-start;justify-content:center;}
+
+  .phone-col{display:flex;flex-direction:column;align-items:center;gap:14px;}
+  .phone-label{
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.24em;
+    text-transform:uppercase;color:#444;
+  }
+  .phone-label span{color:#888;}
+
+  /* iPhone frame */
+  .frame{
+    width:390px;height:844px;
+    border-radius:52px;
+    padding:8px;
+    position:relative;
+    box-shadow:
+      0 0 0 1.5px #2a2a2e,
+      inset 0 0 0 2px #111,
+      0 40px 80px -30px rgba(0,0,0,0.8);
+  }
+  .frame.warm{background:linear-gradient(160deg,#2a1e1e 0%,#130b0b 100%);}
+  .frame.cool{background:linear-gradient(160deg,#1c1e2e 0%,#080912 100%);}
+  .frame::after{
+    content:"";position:absolute;inset:0;border-radius:52px;
+    background:linear-gradient(130deg,rgba(255,255,255,0.12) 0%,transparent 14%,transparent 86%,rgba(255,255,255,0.07) 100%);
+    pointer-events:none;
+  }
+  .screen{
+    width:100%;height:100%;border-radius:45px;
+    overflow:hidden;position:relative;
+  }
+
+  /* Dynamic Island */
+  .dyn-island{
+    position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    width:120px;height:34px;border-radius:20px;
+    background:#000;z-index:10;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;
+  }
+  .dyn-island .pulse{
+    width:7px;height:7px;border-radius:50%;background:#3ecf6c;
+    box-shadow:0 0 8px #3ecf6c;
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.15)}}
+
+  /* Status bar */
+  .statusbar{
+    height:54px;padding:0 22px;
+    display:flex;align-items:center;justify-content:space-between;
+    font-size:14.5px;font-weight:600;
+    position:relative;z-index:5;
+    flex-shrink:0;
+  }
+  .statusbar .right{display:flex;gap:5px;align-items:center;}
+
+  /* Scrollable content */
+  .scroller{
+    flex:1;overflow-y:auto;overflow-x:hidden;
+    padding:0 18px 100px;
+  }
+  .scroller::-webkit-scrollbar{display:none;}
+
+  /* Tab bar */
+  .tabbar{
+    position:absolute;bottom:0;left:0;right:0;
+    height:82px;
+    border-top-width:1px;border-top-style:solid;
+    display:flex;align-items:center;justify-content:space-around;
+    padding:0 8px 16px;
+    z-index:10;
+  }
+  .tab{
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+    font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.18em;
+    text-transform:uppercase;cursor:pointer;padding:6px 10px;
+  }
+
+  /* Shared content elements */
+  .screen-inner{
+    display:flex;flex-direction:column;
+    height:100%;
+  }
+
+  /* Grain overlay */
+  .grain-overlay{
+    position:absolute;inset:0;pointer-events:none;z-index:50;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.75  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode:screen;opacity:0.8;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+const A = {
+  bg:      '#1A0F0F',
+  card:    '#2A1A1A',
+  card2:   '#221515',
+  accent:  '#DFBA7A',
+  text:    '#F5EFE6',
+  muted:   '#A89080',
+  faint:   '#5C4040',
+  alert:   '#521532',
+  alertFg: '#F5EFE6',
+  border:  '#3a2525',
+  divider: 'rgba(220,170,100,0.12)',
+  tabBorder:'rgba(220,170,100,0.15)',
+};
+const B = {
+  bg:      '#0E0F1A',
+  card:    '#1A1C2E',
+  card2:   '#151728',
+  accent:  '#D4D1E5',
+  text:    '#F5EFE6',
+  muted:   '#7A7E99',
+  faint:   '#383B55',
+  alert:   '#7C131F',
+  alertFg: '#F5EFE6',
+  border:  '#272946',
+  divider: 'rgba(212,209,229,0.1)',
+  tabBorder:'rgba(212,209,229,0.12)',
+};
+
+const SERIF  = "'Newsreader','Iowan Old Style',Georgia,serif";
+const SANS   = "'Geist',system-ui,-apple-system,sans-serif";
+const MONO   = "'JetBrains Mono','SF Mono',Menlo,monospace";
+
+/* ── shared micro components ── */
+function Label({ v, children, style }) {
+  return <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.2em', textTransform:'uppercase', color: v.muted, marginBottom: 12, ...style }}>{children}</div>;
+}
+function SectionHead({ v, children, right }) {
+  return (
+    <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom: 14, marginTop: 28 }}>
+      <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 18, color: v.text, letterSpacing:'-0.01em' }}>{children}</span>
+      {right && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.2em', textTransform:'uppercase', color: v.muted }}>{right}</span>}
+    </div>
+  );
+}
+function Card({ v, children, style }) {
+  return (
+    <div style={{
+      background: v.card, borderRadius: 16, padding: '18px 18px',
+      border: `1px solid ${v.border}`, marginBottom: 12, ...style
+    }}>{children}</div>
+  );
+}
+function Tag({ v, children, outlined, alert }) {
+  if (alert) return (
+    <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.18em', textTransform:'uppercase',
+      background: v.alert, color: v.alertFg, padding: '3px 8px', borderRadius: 6 }}>{children}</span>
+  );
+  if (outlined) return (
+    <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.18em', textTransform:'uppercase',
+      border: `1px solid ${v.accent}`, color: v.accent, padding: '3px 8px', borderRadius: 6 }}>{children}</span>
+  );
+  return (
+    <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.18em', textTransform:'uppercase',
+      background: `${v.accent}22`, color: v.accent, padding: '3px 8px', borderRadius: 6 }}>{children}</span>
+  );
+}
+function Hairline({ v }) {
+  return <div style={{ height: 1, background: v.divider, margin: '12px 0' }} />;
+}
+function Sparkline({ v, points, height = 36 }) {
+  const maxY = Math.max(...points), minY = Math.min(...points);
+  const w = 100, h = height;
+  const pts = points.map((y, i) => {
+    const x = (i / (points.length - 1)) * w;
+    const yp = h - ((y - minY) / (maxY - minY + 0.01)) * (h - 4) - 2;
+    return `${x},${yp}`;
+  }).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width:'100%', height }}>
+      <polyline fill="none" stroke={v.accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={pts}/>
+      <circle cx={pts.split(' ').pop().split(',')[0]} cy={pts.split(' ').pop().split(',')[1]} r="2.5" fill={v.accent}/>
+    </svg>
+  );
+}
+function MiniBarChart({ v }) {
+  const bars = [6,8,5,9,7,4,7.4];
+  const max = 10;
+  return (
+    <svg viewBox="0 0 70 28" style={{ width:'100%', height: 28 }}>
+      {bars.map((b, i) => (
+        <rect key={i} x={i * 10 + 1} y={28 - (b/max)*24} width={8} height={(b/max)*24}
+          rx="2" fill={i === bars.length-1 ? v.accent : v.faint}/>
+      ))}
+    </svg>
+  );
+}
+function Dots({ v, n = 5, filled = 0 }) {
+  return (
+    <div style={{ display:'flex', gap: 8 }}>
+      {Array.from({length: n}).map((_, i) => (
+        <div key={i} style={{
+          width: 16, height: 16, borderRadius: '50%',
+          background: i < filled ? v.accent : 'transparent',
+          border: `1.5px solid ${i < filled ? v.accent : v.faint}`,
+        }}/>
+      ))}
+    </div>
+  );
+}
+function Radio({ v, active }) {
+  return (
+    <div style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+      border: `1.5px solid ${active ? v.accent : v.faint}`,
+      display:'grid', placeItems:'center' }}>
+      {active && <div style={{ width: 10, height: 10, borderRadius: '50%', background: v.accent }}/>}
+    </div>
+  );
+}
+
+/* ── Tab icons (inline SVG paths) ── */
+function TabIcon({ name, size = 20 }) {
+  const d = {
+    today:   'M12 3L4 9v13h5v-7h6v7h5V9z',
+    load:    'M3 17l4-8 4 4 4-6 4 6',
+    log:     'M12 5v14M5 12h14',
+    history: 'M12 8v4l3 3M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z',
+    me:      'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  }[name];
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d={d}/>
+    </svg>
+  );
+}
+function TabBar({ v, active }) {
+  const tabs = ['today','load','log','history','me'];
+  const labels = { today:'Today', load:'Load', log:'Log', history:'History', me:'Me' };
+  return (
+    <div className="tabbar" style={{ background: v.bg, borderTopColor: v.tabBorder }}>
+      {tabs.map(t => (
+        <div key={t} className="tab" style={{ color: t === active ? v.accent : v.faint }}>
+          <TabIcon name={t} size={20}/>
+          <span>{labels[t]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── STATUS BAR ── */
+function StatusBar({ v }) {
+  return (
+    <div className="statusbar" style={{ background: v.bg, color: v.text }}>
+      <span>9:41</span>
+      <div className="right">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="none">
+          <rect x="0" y="8" width="3" height="4" rx="0.5" fill="currentColor"/>
+          <rect x="5" y="5" width="3" height="7" rx="0.5" fill="currentColor"/>
+          <rect x="10" y="2" width="3" height="10" rx="0.5" fill="currentColor"/>
+          <rect x="15" y="0" width="3" height="12" rx="0.5" fill="currentColor" opacity="0.4"/>
+        </svg>
+        <svg width="14" height="11" viewBox="0 0 14 11" fill="none">
+          <path d="M7 9a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" fill="currentColor"/>
+          <path d="M2 5c1.3-1.3 3-2 5-2s3.7.7 5 2" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+          <path d="M0 2.5c1.9-1.8 4.4-2.5 7-2.5s5.1.7 7 2.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" opacity="0.8"/>
+        </svg>
+        <svg width="24" height="11" viewBox="0 0 24 11">
+          <rect x="0.5" y="0.5" width="20" height="10" rx="2" fill="none" stroke="currentColor" strokeOpacity="0.5"/>
+          <rect x="2" y="2" width="16" height="7" rx="1" fill="currentColor"/>
+          <rect x="21" y="3.5" width="2" height="4" rx="0.6" fill="currentColor" opacity="0.5"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCREEN 1 — TODAY
+══════════════════════════════════════════════════════════════ */
+function TodayScreen({ v }) {
+  return (
+    <div className="screen-inner" style={{ background: v.bg }}>
+      <StatusBar v={v}/>
+      <div className="scroller">
+        {/* Header */}
+        <div style={{ padding:'20px 0 0' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8 }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing:'0.2em', textTransform:'uppercase', color: v.muted }}>
+              Friday · Apr 25 · 09:41 · Cluj
+            </span>
+            <div style={{ background: '#000', borderRadius: 12, padding:'4px 10px', display:'flex', alignItems:'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background:'#3ecf6c', boxShadow:'0 0 8px #3ecf6c', flexShrink: 0 }}/>
+              <span style={{ fontFamily: MONO, fontSize: 9.5, color:'#3ecf6c', letterSpacing:'0.08em' }}>HR · 58</span>
+              <span style={{ fontFamily: MONO, fontSize: 9, color: v.muted, letterSpacing:'0.18em', textTransform:'uppercase' }}>live</span>
+            </div>
+          </div>
+          <h1 style={{ margin:'8px 0 0', fontFamily: SERIF, fontWeight: 400, fontSize: 44, lineHeight: 1.0, letterSpacing:'-0.02em', color: v.text }}>
+            Good morning,
+          </h1>
+          <h1 style={{ margin: 0, fontFamily: SERIF, fontStyle:'italic', fontWeight: 400, fontSize: 44, lineHeight: 1.05, letterSpacing:'-0.02em', color: v.accent }}>
+            Vlad.
+          </h1>
+          <p style={{ margin:'12px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 15, color: v.muted, lineHeight: 1.4 }}>
+            "The nervous system is generous today."
+          </p>
+        </div>
+
+        {/* Prescription card */}
+        <Card v={v} style={{ marginTop: 22, padding:'20px 20px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 16 }}>
+            <Label v={v} style={{ marginBottom: 0 }}>Today's Prescription</Label>
+            <Tag v={v}>Z2 · Aerobic</Tag>
+          </div>
+          <Hairline v={v}/>
+          <h2 style={{ margin:'14px 0 4px', fontFamily: SERIF, fontWeight: 400, fontSize: 28, lineHeight: 1.05, letterSpacing:'-0.015em', color: v.text }}>
+            A quiet aerobic hour,
+          </h2>
+          <h2 style={{ margin:'0 0 14px', fontFamily: SERIF, fontStyle:'italic', fontWeight: 400, fontSize: 28, lineHeight: 1.05, letterSpacing:'-0.015em', color: v.accent }}>
+            on soft ground.
+          </h2>
+          <p style={{ margin:'0 0 18px', fontFamily: SANS, fontSize: 13.5, lineHeight: 1.5, color: v.muted }}>
+            Form is fresh, heart steady, last night gave you an honest seven. Bank the fitness without spending it.
+          </p>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 6, marginBottom: 18 }}>
+            {[['Time','60–75 min'],['Heart','145–158 bpm'],['Pace','5:20–45']].map(([k,val])=>(
+              <div key={k} style={{ background: v.card2, borderRadius: 10, padding:'10px 10px' }}>
+                <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.18em', textTransform:'uppercase', color: v.muted, marginBottom: 5 }}>{k}</div>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 14, color: v.text, lineHeight: 1.1 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+          <button style={{
+            width:'100%', padding:'15px 16px', borderRadius: 12, border:'none',
+            background: v.alert, color: v.alertFg, cursor:'pointer',
+            fontFamily: SERIF, fontStyle:'italic', fontSize: 17, fontWeight: 400,
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+            letterSpacing:'-0.005em',
+          }}>
+            <span>Begin — out the door</span>
+            <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing:'0.12em', opacity: 0.75 }}>est. 65 min</span>
+          </button>
+        </Card>
+
+        <SectionHead v={v} right="All →">This morning · the body's account</SectionHead>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: 10, marginBottom: 12 }}>
+          {/* HRV */}
+          <Card v={v} style={{ marginBottom: 0, padding:'16px 14px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8 }}>
+              <Label v={v} style={{ marginBottom: 0 }}>HRV · RMSSD</Label>
+              <Tag v={v}>+4 above</Tag>
+            </div>
+            <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 34, letterSpacing:'-0.025em', color: v.text, lineHeight: 1, margin:'6px 0 8px' }}>
+              72 <span style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 15, color: v.muted, fontWeight: 400 }}>ms</span>
+            </div>
+            <Sparkline v={v} points={[64,62,66,68,65,70,72]} height={32}/>
+            <p style={{ margin:'8px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 12, color: v.muted, lineHeight: 1.4 }}>Four above baseline. A generous read.</p>
+          </Card>
+          {/* Sleep */}
+          <Card v={v} style={{ marginBottom: 0, padding:'16px 14px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8 }}>
+              <Label v={v} style={{ marginBottom: 0 }}>Sleep · Night</Label>
+              <Tag v={v}>honest</Tag>
+            </div>
+            <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 32, letterSpacing:'-0.025em', color: v.text, lineHeight: 1, margin:'6px 0 8px' }}>
+              7.4 <span style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 13, color: v.muted, fontWeight: 400 }}>h · 82</span>
+            </div>
+            <MiniBarChart v={v}/>
+            <p style={{ margin:'8px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 12, color: v.muted, lineHeight: 1.4 }}>Not a full measure — but earned.</p>
+          </Card>
+        </div>
+      </div>
+      <TabBar v={v} active="today"/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCREEN 2 — LOAD
+══════════════════════════════════════════════════════════════ */
+function LoadScreen({ v }) {
+  const chartPts = 'M0,56 C30,52 60,46 90,42 S150,32 180,26 S250,18 300,12';
+  const atl = 'M0,60 C30,54 60,62 90,50 S150,44 180,40 S250,26 300,22';
+  return (
+    <div className="screen-inner" style={{ background: v.bg }}>
+      <StatusBar v={v}/>
+      <div className="scroller">
+        <div style={{ padding:'20px 0 0', display:'flex', justifyContent:'space-between', alignItems:'flex-end' }}>
+          <div>
+            <Label v={v}>Friday · Apr 25</Label>
+            <h1 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: 36, letterSpacing:'-0.02em', lineHeight: 1.05, color: v.text }}>
+              Training load <span style={{ color: v.muted, fontSize: 22 }}>· last 42 days</span>
+            </h1>
+          </div>
+          <Tag v={v}>420+</Tag>
+        </div>
+
+        {/* Form card */}
+        <Card v={v} style={{ marginTop: 20 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom: 16 }}>
+            <span style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 26, color: v.text }}>
+              Form <em style={{ fontStyle:'italic', color: v.accent }}>is fresh.</em>
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing:'0.12em', color: v.accent }}>▲ ramp +4.2 /wk</span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 10, marginBottom: 18 }}>
+            {[['Fitness','64','ctl'],['Fatigue','58','atl'],['Form','+6','tsb']].map(([k,n,sub],i)=>(
+              <div key={k}>
+                <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.2em', textTransform:'uppercase', color: v.muted, marginBottom: 4 }}>{k}</div>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 36, letterSpacing:'-0.025em', lineHeight: 1, color: i===2 ? v.accent : v.text }}>{n}</div>
+                <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.12em', textTransform:'uppercase', color: v.faint, marginTop: 2 }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+          <Hairline v={v}/>
+          <svg viewBox="0 0 300 70" style={{ width:'100%', height: 70, marginTop: 6 }}>
+            <line x1="0" y1="40" x2="300" y2="40" stroke={v.faint} strokeWidth="0.5" strokeDasharray="3 3"/>
+            <path d={atl} fill="none" stroke={v.muted} strokeWidth="1.2" strokeDasharray="4 3" opacity="0.7"/>
+            <path d={chartPts} fill="none" stroke={v.accent} strokeWidth="2"/>
+            <circle cx="300" cy="12" r="3" fill={v.accent}/>
+            <text x="2" y="68" fontFamily="JetBrains Mono" fontSize="8" fill={v.muted} opacity="0.6">MAR 06</text>
+            <text x="270" y="68" fontFamily="JetBrains Mono" fontSize="8" fill={v.muted} opacity="0.6">TODAY</text>
+          </svg>
+          <Hairline v={v}/>
+          <p style={{ margin: 0, fontFamily: SERIF, fontStyle:'italic', fontSize: 13, color: v.muted, lineHeight: 1.5 }}>
+            Last time you were this fresh, you ran your winter PR. Jan 14.
+          </p>
+        </Card>
+
+        {/* Muscle freshness */}
+        <Card v={v}>
+          <div style={{ display:'flex', justifyContent:'space-between' }}>
+            <Label v={v} style={{ marginBottom: 0 }}>Muscle Freshness</Label>
+            <Label v={v} style={{ marginBottom: 0 }}>Today</Label>
+          </div>
+          <Hairline v={v}/>
+          {/* SVG body silhouette with heat tinting */}
+          <svg viewBox="0 0 200 220" style={{ width:'100%', height: 130, display:'block' }}>
+            {/* simplified body shape */}
+            <ellipse cx="100" cy="40" rx="22" ry="28" fill={`${v.accent}40`} stroke={v.faint} strokeWidth="0.5"/>
+            {/* torso */}
+            <rect x="78" y="65" width="44" height="56" rx="6" fill={`${v.accent}35`} stroke={v.faint} strokeWidth="0.5"/>
+            {/* quads */}
+            <rect x="72" y="118" width="22" height="48" rx="5" fill={`${v.accent}28`} stroke={v.faint} strokeWidth="0.5"/>
+            <rect x="106" y="118" width="22" height="48" rx="5" fill={`${v.accent}28`} stroke={v.faint} strokeWidth="0.5"/>
+            {/* calves */}
+            <rect x="74" y="168" width="18" height="36" rx="4" fill={`${v.accent}50`} stroke={v.faint} strokeWidth="0.5"/>
+            <rect x="108" y="168" width="18" height="36" rx="4" fill={`${v.accent}50`} stroke={v.faint} strokeWidth="0.5"/>
+            {/* shoulder tags */}
+            <rect x="56" y="66" width="20" height="30" rx="4" fill={`${v.accent}45`} stroke={v.faint} strokeWidth="0.5"/>
+            <rect x="124" y="66" width="20" height="30" rx="4" fill={`${v.accent}45`} stroke={v.faint} strokeWidth="0.5"/>
+            {/* labels */}
+            <text x="52" y="112" fontFamily="JetBrains Mono" fontSize="7" fill={v.muted} textAnchor="end">shoulders</text>
+            <text x="100" y="150" fontFamily="JetBrains Mono" fontSize="7" fill={v.muted} textAnchor="middle">quads 72%</text>
+            <text x="70" y="208" fontFamily="JetBrains Mono" fontSize="7" fill={v.accent} textAnchor="middle">calves 31%</text>
+            <text x="130" y="208" fontFamily="JetBrains Mono" fontSize="7" fill={v.accent} textAnchor="middle">calves 31%</text>
+          </svg>
+          <div style={{ display:'flex', alignItems:'center', gap: 8, marginTop: 10 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9, color: v.muted, letterSpacing:'0.14em' }}>FATIGUED</span>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, background: `linear-gradient(to right, ${v.faint}, ${v.accent})` }}/>
+            <span style={{ fontFamily: MONO, fontSize: 9, color: v.muted, letterSpacing:'0.14em' }}>FRESH</span>
+          </div>
+        </Card>
+
+        <SectionHead v={v} right="Calendar →">The week ahead</SectionHead>
+        <Card v={v} style={{ padding: 0, overflow:'hidden' }}>
+          {[
+            {d:'17',day:'FRI',title:'Easy aerobic hour',sub:'Z2 · soft ground',tag:'RUN'},
+            {d:'18',day:'SAT',title:'The iron forty-five',sub:'posterior chain',tag:'STRENGTH'},
+            {d:'19',day:'SUN',title:'Long run, progressive',sub:'18 km · last 4 at MP',tag:'LONG'},
+            {d:'21',day:'TUE',title:'Threshold, three by ten',sub:'two-minute float',tag:'QUALITY'},
+          ].map((row, i) => (
+            <div key={row.d} style={{
+              display:'grid', gridTemplateColumns:'54px 1fr auto',
+              alignItems:'center', gap: 14, padding:'14px 18px',
+              borderBottom: i < 3 ? `1px solid ${v.divider}` : 'none',
+            }}>
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, color: v.accent, lineHeight: 1 }}>{row.d}</div>
+                <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing:'0.18em', textTransform:'uppercase', color: v.faint, marginTop: 3 }}>{row.day}</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 15, color: v.text, letterSpacing:'-0.005em' }}>{row.title}</div>
+                <div style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 13, color: v.muted, marginTop: 2 }}>{row.sub}</div>
+              </div>
+              <Tag v={v} outlined>{row.tag}</Tag>
+            </div>
+          ))}
+        </Card>
+      </div>
+      <TabBar v={v} active="load"/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCREEN 3 — LOG  (strength logger + check-in modal)
+══════════════════════════════════════════════════════════════ */
+
+/* Barbell icon for session rows */
+function BarbellIcon({ color, size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+         stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 12h12M3 9v6M21 9v6M6 8v8M18 8v8"/>
+    </svg>
+  );
+}
+
+/* Inline input for set/rep/weight fields */
+function InlineField({ v, value, width = 40 }) {
+  return (
+    <div style={{
+      width, height: 28, borderRadius: 6,
+      border: `1px solid ${v.border}`,
+      background: v.card2,
+      display: 'grid', placeItems: 'center',
+      fontFamily: MONO, fontSize: 12, color: v.text,
+      letterSpacing: '0.04em',
+    }}>{value}</div>
+  );
+}
+
+/* Check-in modal — bottom sheet */
+function CheckInModal({ v, onClose }) {
+  return (
+    /* Backdrop */
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 40,
+      background: 'rgba(0,0,0,0.55)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+    }}>
+      {/* Sheet */}
+      <div style={{
+        background: v.card,
+        borderRadius: '20px 20px 0 0',
+        border: `1px solid ${v.border}`,
+        borderBottom: 'none',
+        padding: '0 0 90px',
+        maxHeight: '82%',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 -20px 60px rgba(0,0,0,0.5)',
+      }}>
+        {/* Drag handle */}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '14px 0 0' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: v.faint }}/>
+        </div>
+
+        {/* Modal header */}
+        <div style={{ padding: '16px 22px 12px', borderBottom: `1px solid ${v.divider}` }}>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.2em', textTransform:'uppercase', color: v.muted, marginBottom: 8 }}>
+            Friday · Apr 25
+          </div>
+          <h2 style={{ margin: '0 0 4px', fontFamily: SERIF, fontWeight: 400, fontSize: 28, letterSpacing:'-0.015em', lineHeight: 1.05, color: v.text }}>
+            How do you <em style={{ fontStyle:'italic', color: v.accent }}>arrive</em> today?
+          </h2>
+          <p style={{ margin: 0, fontFamily: SERIF, fontStyle:'italic', fontSize: 13.5, color: v.muted }}>
+            Your answer shapes the prescription.
+          </p>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '16px 22px', flex: 1 }}>
+          {/* Body signals */}
+          <div style={{ background: v.card2, borderRadius: 14, padding: '16px 16px', marginBottom: 12, border:`1px solid ${v.border}` }}>
+            <Label v={v}>Body Signals</Label>
+            {[['Overall feel',4],['Legs',3],['Upper body',4],['Joints',5]].map(([label,val]) => (
+              <div key={label} style={{ marginBottom: 14 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom: 8 }}>
+                  <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 14.5, color: v.text }}>{label}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 10, color: v.accent, letterSpacing:'0.08em' }}>{val} / 5</span>
+                </div>
+                <Dots v={v} n={5} filled={val}/>
+              </div>
+            ))}
+          </div>
+
+          {/* Context */}
+          <div style={{ background: v.card2, borderRadius: 14, padding: '16px 16px', marginBottom: 16, border:`1px solid ${v.border}` }}>
+            <Label v={v}>Context</Label>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: SANS, fontSize: 13, color: v.muted, marginBottom: 8 }}>Time available</div>
+              <div style={{ display:'flex', gap: 8 }}>
+                {['Full session','Short session'].map((opt, i) => (
+                  <span key={opt} style={{
+                    fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.14em', textTransform:'uppercase',
+                    padding:'7px 11px', borderRadius: 8, cursor:'pointer',
+                    background: i===0 ? v.accent : 'transparent',
+                    color: i===0 ? v.bg : v.muted,
+                    border: i===0 ? 'none' : `1px solid ${v.faint}`,
+                  }}>{opt}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: SANS, fontSize: 13, color: v.muted, marginBottom: 8 }}>Going out tonight?</div>
+              <div style={{ display:'flex', gap: 8 }}>
+                {['No','Yes'].map((opt, i) => (
+                  <span key={opt} style={{
+                    fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.14em', textTransform:'uppercase',
+                    padding:'7px 11px', borderRadius: 8, cursor:'pointer',
+                    background: i===0 ? v.accent : 'transparent',
+                    color: i===0 ? v.bg : v.muted,
+                    border: i===0 ? 'none' : `1px solid ${v.faint}`,
+                  }}>{opt}</span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontFamily: SANS, fontSize: 13, color: v.muted, marginBottom: 8 }}>Injury notes</div>
+              <div style={{
+                padding: '11px 13px', borderRadius: 10, border:`1px solid ${v.border}`,
+                fontFamily: SERIF, fontStyle:'italic', fontSize: 13.5, color: v.faint,
+              }}>Anything nagging?</div>
+            </div>
+          </div>
+
+          {/* Submit */}
+          <button onClick={onClose} style={{
+            width:'100%', padding:'15px 16px', borderRadius: 12, border:'none',
+            background: v.accent, color: v.bg, cursor:'pointer',
+            fontFamily: SERIF, fontStyle:'italic', fontSize: 18, letterSpacing:'-0.01em',
+            marginBottom: 10,
+          }}>Submit check-in</button>
+          <p style={{ textAlign:'center', fontFamily: MONO, fontSize: 9.5, color: v.faint, letterSpacing:'0.12em' }}>
+            LAST SUBMITTED: YESTERDAY AT 08:54
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LogScreen({ v }) {
+  const [modalOpen, setModalOpen] = React.useState(false);
+  const exercises = [
+    { name:'Romanian Deadlift', sets:'4', reps:'8', kg:'80' },
+    { name:'Split Squat',       sets:'3', reps:'10', kg:'50' },
+    { name:'Hip Thrust',        sets:'3', reps:'12', kg:'90' },
+  ];
+  const sessions = [
+    { name:'Posterior chain', sub:'RDL · split squat · hip thrust', date:'Apr 23', dur:'45 min' },
+    { name:'Upper push',      sub:'Bench · OHP · tricep',           date:'Apr 20', dur:'40 min' },
+    { name:'Upper pull',      sub:'Weighted pull-up · row · curl',  date:'Apr 17', dur:'50 min' },
+  ];
+  const types = ['Posterior chain','Upper push','Upper pull'];
+
+  return (
+    <div className="screen-inner" style={{ background: v.bg, position:'relative' }}>
+      <StatusBar v={v}/>
+      <div className="scroller" style={{ paddingBottom: 120 }}>
+
+        {/* Header */}
+        <div style={{ padding:'20px 0 4px', display:'flex', justifyContent:'space-between', alignItems:'flex-end' }}>
+          <div>
+            <h1 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: 42, letterSpacing:'-0.02em', lineHeight: 1, color: v.text }}>Log</h1>
+            <p style={{ margin:'4px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 14, color: v.muted }}>strength & sessions</p>
+          </div>
+          <button style={{
+            fontFamily: MONO, fontSize: 10, letterSpacing:'0.16em', textTransform:'uppercase',
+            padding:'8px 14px', borderRadius: 20, border:'none', cursor:'pointer',
+            background: v.accent, color: v.bg, fontWeight: 500,
+          }}>+ New session</button>
+        </div>
+
+        {/* Recent sessions */}
+        <Card v={v} style={{ marginTop: 20, padding: 0, overflow:'hidden' }}>
+          {sessions.map((s, i) => (
+            <div key={i} style={{
+              display:'grid', gridTemplateColumns:'36px 1fr auto',
+              gap: 12, padding:'14px 18px', alignItems:'center',
+              borderBottom: i < sessions.length-1 ? `1px solid ${v.divider}` : 'none',
+            }}>
+              <BarbellIcon color={v.faint} size={18}/>
+              <div>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 15, color: v.text, letterSpacing:'-0.005em' }}>{s.name}</div>
+                <div style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 12.5, color: v.muted, marginTop: 2 }}>{s.sub}</div>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap: 5 }}>
+                <span style={{ fontFamily: MONO, fontSize: 9.5, color: v.muted, letterSpacing:'0.08em' }}>{s.date}</span>
+                <span style={{
+                  fontFamily: MONO, fontSize: 9, letterSpacing:'0.14em', textTransform:'uppercase',
+                  padding:'3px 8px', borderRadius: 6,
+                  background: `${v.accent}18`, color: v.accent,
+                }}>{s.dur}</span>
+              </div>
+            </div>
+          ))}
+        </Card>
+        <p style={{ textAlign:'center', fontFamily: MONO, fontSize: 9.5, color: v.faint, letterSpacing:'0.16em', textTransform:'uppercase', margin:'6px 0 20px' }}>
+          3 sessions this week
+        </p>
+
+        {/* Active session builder */}
+        <Card v={v}>
+          <Label v={v}>Today's session</Label>
+
+          {/* Type selectors */}
+          <div style={{ display:'flex', gap: 8, marginBottom: 18, overflowX:'auto', paddingBottom: 2 }}>
+            {types.map((t, i) => (
+              <span key={t} style={{
+                fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.14em', textTransform:'uppercase',
+                padding:'7px 13px', borderRadius: 20, cursor:'pointer', whiteSpace:'nowrap', flexShrink: 0,
+                background: i===0 ? v.accent : 'transparent',
+                color: i===0 ? v.bg : v.muted,
+                border: i===0 ? 'none' : `1px solid ${v.faint}`,
+              }}>{t}</span>
+            ))}
+          </div>
+
+          {/* Exercise rows */}
+          <Hairline v={v}/>
+          {exercises.map((ex, i) => (
+            <div key={i}>
+              <div style={{
+                display:'grid', gridTemplateColumns:'1fr auto',
+                alignItems:'center', gap: 10, padding:'11px 0',
+              }}>
+                <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 15.5, color: v.text, letterSpacing:'-0.005em' }}>{ex.name}</span>
+                <div style={{ display:'flex', gap: 6, alignItems:'center' }}>
+                  <InlineField v={v} value={ex.sets} width={36}/>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: v.faint }}>×</span>
+                  <InlineField v={v} value={ex.reps} width={36}/>
+                  <InlineField v={v} value={`${ex.kg} kg`} width={54}/>
+                  <span style={{ fontFamily: MONO, fontSize: 10, color: v.muted, letterSpacing:'0.1em', marginLeft: 2, whiteSpace:'nowrap' }}>+ set</span>
+                </div>
+              </div>
+              {i < exercises.length-1 && <Hairline v={v}/>}
+            </div>
+          ))}
+          <Hairline v={v}/>
+
+          {/* Add exercise */}
+          <div style={{ display:'flex', alignItems:'center', gap: 8, padding:'10px 0 14px' }}>
+            <span style={{ fontFamily: MONO, fontSize: 18, color: v.muted, lineHeight: 1 }}>+</span>
+            <span style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 14, color: v.muted }}>Add exercise</span>
+          </div>
+
+          {/* Finish button */}
+          <button style={{
+            width:'100%', padding:'15px 16px', borderRadius: 12, border:'none',
+            background: v.accent, color: v.bg, cursor:'pointer',
+            fontFamily: SERIF, fontStyle:'italic', fontSize: 18, letterSpacing:'-0.01em',
+          }}>Finish session</button>
+        </Card>
+      </div>
+
+      {/* Floating check-in FAB */}
+      <button
+        onClick={() => setModalOpen(true)}
+        style={{
+          position: 'absolute', right: 18, bottom: 92, zIndex: 30,
+          padding:'11px 18px', borderRadius: 20, border:'none', cursor:'pointer',
+          background: v.alert, color: v.alertFg,
+          fontFamily: SERIF, fontStyle:'italic', fontSize: 16,
+          boxShadow:`0 8px 24px -8px ${v.alert}`,
+          display:'flex', alignItems:'center', gap: 8,
+          letterSpacing:'-0.005em',
+        }}
+      >
+        Check in ↑
+      </button>
+
+      <TabBar v={v} active="log"/>
+
+      {/* Check-in modal */}
+      {modalOpen && <CheckInModal v={v} onClose={() => setModalOpen(false)}/>}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCREEN 4 — HISTORY
+══════════════════════════════════════════════════════════════ */
+function HistoryScreen({ v }) {
+  const workouts = [
+    {title:'Easy aerobic hour', sub:'Z2 · 68 min · 12.4 km', date:'Apr 24', tag:'RUN'},
+    {title:'The iron forty-five', sub:'Posterior chain · 6 exercises', date:'Apr 23', tag:'STRENGTH'},
+    {title:'Long run, progressive', sub:'18.2 km · last 4 at MP', date:'Apr 21', tag:'LONG'},
+    {title:'Boulder session', sub:'90 min · V4–V5', date:'Apr 20', tag:'CLIMB'},
+    {title:'Threshold intervals', sub:'3 × 10 min', date:'Apr 18', tag:'QUALITY'},
+    {title:'XC trail ride', sub:'2h 15 min · 38 km', date:'Apr 17', tag:'MTB'},
+  ];
+  return (
+    <div className="screen-inner" style={{ background: v.bg }}>
+      <StatusBar v={v}/>
+      <div className="scroller">
+        <div style={{ padding:'20px 0 14px' }}>
+          <h1 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: 42, letterSpacing:'-0.02em', lineHeight: 1, color: v.text }}>
+            History
+          </h1>
+        </div>
+        {/* Filters */}
+        <div style={{ display:'flex', gap: 8, marginBottom: 22, flexWrap:'wrap' }}>
+          {['All','Run','Strength','MTB','Climb'].map((f, i) => (
+            <span key={f} style={{
+              fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.18em', textTransform:'uppercase',
+              padding:'6px 12px', borderRadius: 20, cursor:'pointer',
+              background: i===0 ? v.accent : 'transparent',
+              color: i===0 ? v.bg : v.muted,
+              border: i===0 ? 'none' : `1px solid ${v.faint}`,
+            }}>{f}</span>
+          ))}
+        </div>
+
+        <Card v={v} style={{ padding: 0, overflow:'hidden' }}>
+          {workouts.map((w, i) => (
+            <div key={i} style={{
+              display:'grid', gridTemplateColumns:'1fr auto',
+              gap: 12, padding:'15px 18px',
+              borderBottom: i < workouts.length-1 ? `1px solid ${v.divider}` : 'none',
+            }}>
+              <div>
+                <div style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 15.5, color: v.text, letterSpacing:'-0.005em', marginBottom: 3 }}>{w.title}</div>
+                <div style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 13, color: v.muted }}>{w.sub}</div>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap: 6 }}>
+                <span style={{ fontFamily: MONO, fontSize: 9.5, color: v.muted, letterSpacing:'0.1em' }}>{w.date}</span>
+                <Tag v={v} outlined>{w.tag}</Tag>
+              </div>
+            </div>
+          ))}
+        </Card>
+
+        <SectionHead v={v} right="See all →">Trends</SectionHead>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: 10 }}>
+          {[
+            {title:'Running economy', caption:'GAP improving +4% / 30 days', pts:[4,5,4.5,6,5.5,7,7.4]},
+            {title:'Squat 1RM', caption:'Est. 127 kg · +6 kg this cycle', pts:[100,105,108,110,112,120,127]},
+          ].map(chart => (
+            <Card v={v} key={chart.title} style={{ marginBottom: 0, padding:'14px 14px' }}>
+              <Label v={v} style={{ marginBottom: 8 }}>{chart.title}</Label>
+              <Sparkline v={v} points={chart.pts} height={36}/>
+              <p style={{ margin:'8px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 11.5, color: v.muted, lineHeight: 1.4 }}>{chart.caption}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+      <TabBar v={v} active="history"/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCREEN 5 — ME
+══════════════════════════════════════════════════════════════ */
+function MeScreen({ v }) {
+  const days = ['M','T','W','T','F','S','S'];
+  const active = [0,2,4]; // Mon, Wed, Fri
+  return (
+    <div className="screen-inner" style={{ background: v.bg }}>
+      <StatusBar v={v}/>
+      <div className="scroller">
+        <div style={{ padding:'20px 0 0', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+          <div>
+            <h1 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: 44, letterSpacing:'-0.02em', color: v.text, lineHeight: 1.02 }}>Vlad</h1>
+            <p style={{ margin:'6px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 14, color: v.muted }}>Multi-sport athlete · Cluj, Romania</p>
+          </div>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%', background: v.card,
+            border: `1.5px solid ${v.border}`, display:'grid', placeItems:'center',
+            fontFamily: SERIF, fontStyle:'italic', fontSize: 22, color: v.accent,
+          }}>V</div>
+        </div>
+
+        {/* Sports */}
+        <Card v={v} style={{ marginTop: 22 }}>
+          <Label v={v}>My Sports</Label>
+          <div style={{ display:'flex', flexWrap:'wrap', gap: 8 }}>
+            {['Running','Strength','MTB','Bouldering','Padel'].map(s => (
+              <span key={s} style={{
+                fontFamily: MONO, fontSize: 9.5, letterSpacing:'0.16em', textTransform:'uppercase',
+                padding:'8px 14px', borderRadius: 10, cursor:'pointer',
+                background: `${v.accent}22`, color: v.accent,
+                border: `1px solid ${v.accent}44`,
+              }}>{s}</span>
+            ))}
+          </div>
+          <p style={{ margin:'12px 0 0', fontFamily: SERIF, fontStyle:'italic', fontSize: 12.5, color: v.muted, lineHeight: 1.45 }}>
+            All sports active. Recommendations weighted by recent load.
+          </p>
+        </Card>
+
+        {/* Training goal */}
+        <Card v={v}>
+          <Label v={v}>Training Goal</Label>
+          {['Athlete','Strength focus','Endurance focus'].map((g, i) => (
+            <div key={g} style={{
+              display:'flex', alignItems:'center', gap: 14, padding:'12px 0',
+              borderBottom: i < 2 ? `1px solid ${v.divider}` : 'none',
+            }}>
+              <Radio v={v} active={i===0}/>
+              <span style={{ fontFamily: SERIF, fontWeight: i===0 ? 500 : 400, fontSize: 16, color: i===0 ? v.text : v.muted, letterSpacing:'-0.005em' }}>{g}</span>
+            </div>
+          ))}
+        </Card>
+
+        {/* Schedule */}
+        <Card v={v}>
+          <Label v={v}>Gym Days</Label>
+          <div style={{ display:'flex', gap: 8, justifyContent:'space-between' }}>
+            {days.map((d, i) => (
+              <div key={i} style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: active.includes(i) ? v.accent : 'transparent',
+                border: `1.5px solid ${active.includes(i) ? v.accent : v.faint}`,
+                display:'grid', placeItems:'center',
+                fontFamily: SANS, fontWeight: 600, fontSize: 13,
+                color: active.includes(i) ? v.bg : v.faint,
+              }}>{d}</div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Garmin */}
+        <Card v={v}>
+          <Label v={v}>Garmin Sync</Label>
+          <div style={{ display:'flex', alignItems:'center', gap: 12, marginBottom: 14 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 8, background: v.card2,
+              border: `1px solid ${v.border}`, display:'grid', placeItems:'center',
+              fontFamily: MONO, fontSize: 10, color: v.accent, fontWeight: 600,
+            }}>G</div>
+            <span style={{ fontFamily: SERIF, fontStyle:'italic', fontSize: 14, color: v.muted }}>
+              Connected as vlad@garmin
+            </span>
+          </div>
+          <div style={{
+            background: v.card2, borderRadius: 10, padding:'13px 16px',
+            display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer',
+            border:`1px solid ${v.border}`,
+          }}>
+            <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 15, color: v.text }}>Sync now</span>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: v.muted, letterSpacing:'0.1em' }}>Today 07:12</span>
+          </div>
+        </Card>
+
+        <p style={{ textAlign:'center', fontFamily: MONO, fontSize: 9, letterSpacing:'0.22em', textTransform:'uppercase', color: v.faint, marginBottom: 14 }}>
+          QS · Vol. 0 · W 42 · Build 0.IV.26
+        </p>
+      </div>
+      <TabBar v={v} active="me"/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PHONE FRAME + ROOT
+══════════════════════════════════════════════════════════════ */
+function Phone({ variant, label, sub, screen }) {
+  const v = variant === 'A' ? A : B;
+  const screens = { today: TodayScreen, load: LoadScreen, log: LogScreen, history: HistoryScreen, me: MeScreen };
+  const Screen = screens[screen] || TodayScreen;
+  return (
+    <div className="phone-col">
+      <div className="phone-label">Variant {variant} <span>· {sub}</span></div>
+      <div className={`frame ${variant==='A' ? 'warm':'cool'}`}>
+        {/* Dynamic island */}
+        <div style={{ position:'absolute', top:21, left:'50%', transform:'translateX(-50%)', zIndex:20 }}>
+          <div className="dyn-island">
+            <span className="pulse"/>
+            <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, letterSpacing:'0.04em' }}>58</span>
+            <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:9, color:'rgba(255,255,255,0.35)', letterSpacing:'0.18em', textTransform:'uppercase' }}>live</span>
+          </div>
+        </div>
+        <div className="screen" style={{ background: v.bg }}>
+          <Screen v={v}/>
+          <div className="grain-overlay"/>
+          {/* Home bar */}
+          <div style={{
+            position:'absolute', bottom:10, left:'50%', transform:'translateX(-50%)',
+            width:130, height:5, borderRadius:4,
+            background:`${v.text}88`, zIndex:60,
+          }}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SCREENS = ['today','load','log','history','me'];
+const LABELS  = {today:'Today',load:'Load',log:'Log',history:'History',me:'Me'};
+
+function App() {
+  const [screen, setScreen] = useState(() => localStorage.getItem('qs-mob-screen')||'today');
+  function go(s) { setScreen(s); localStorage.setItem('qs-mob-screen', s); }
+  return (
+    <div className="app-wrap">
+      <div className="app-header">
+        <h1>Quantified <em>Strides</em></h1>
+        <p>Mobile UI · Two variants · Five screens</p>
+      </div>
+      <div className="switcher">
+        {SCREENS.map(s => (
+          <button key={s} className={s===screen?'on':''} onClick={()=>go(s)}>{LABELS[s]}</button>
+        ))}
+      </div>
+      <div className="phones">
+        <Phone variant="A" sub="Harvest Gold & Wine Berry" screen={screen}/>
+        <Phone variant="B" sub="Blue Haze & Falu Red" screen={screen}/>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
