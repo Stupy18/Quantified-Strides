@@ -109,6 +109,49 @@ class UserRepo:
             {"uid": user_id},
         )
 
+    async def get_hrv_baseline(self, user_id: int) -> tuple[float | None, float | None]:
+        """Returns (mean, sd) from user_profile, or (None, None) if not set."""
+        result = await self.db.execute(
+            text("SELECT hrv_baseline_mean, hrv_baseline_sd FROM user_profile WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None, None
+        return row.hrv_baseline_mean, row.hrv_baseline_sd
+
+    async def update_hrv_baseline(self, user_id: int, mean: float, sd: float) -> None:
+        await self.db.execute(
+            text("""
+                UPDATE user_profile
+                SET hrv_baseline_mean = :mean, hrv_baseline_sd = :sd
+                WHERE user_id = :uid
+            """),
+            {"mean": mean, "sd": sd, "uid": user_id},
+        )
+
+    async def update_zone_speeds(self, user_id: int, zone_speeds: dict) -> None:
+        await self.db.execute(
+            text("""
+                UPDATE user_profile
+                SET zone_speeds = CAST(:v AS jsonb)
+                WHERE user_id = :uid
+            """),
+            {"v": json.dumps(zone_speeds), "uid": user_id},
+        )
+
+    async def get_profile_signals(self, user_id: int):
+        """Returns max_hr, sex, and zone_speeds for signal computation."""
+        result = await self.db.execute(
+            text("""
+                SELECT max_hr, sex, zone_speeds
+                FROM user_profile
+                WHERE user_id = :uid
+            """),
+            {"uid": user_id},
+        )
+        return result.fetchone()
+
     async def get_garmin_creds(self, user_id: int) -> dict:
         result = await self.db.execute(
             text("SELECT garmin_email, garmin_password FROM user_profile WHERE user_id = :uid"),

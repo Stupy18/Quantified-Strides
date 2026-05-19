@@ -8,6 +8,56 @@ class WorkoutMetricsRepo:
 
     # ── per-workout time-series ────────────────────────────────────────────────
 
+    async def get_final_10min_hr_speed(self, workout_id: int) -> list[tuple]:
+        """HR + speed_ms from the final 10 minutes — for zone speed calibration."""
+        result = await self.db.execute(
+            text("""
+                SELECT heart_rate, speed_ms
+                FROM workout_metrics
+                WHERE workout_id = :wid
+                  AND heart_rate IS NOT NULL
+                  AND speed_ms IS NOT NULL AND speed_ms > 0
+                  AND metric_timestamp >= (
+                      SELECT MAX(metric_timestamp) - INTERVAL '10 minutes'
+                      FROM workout_metrics WHERE workout_id = :wid
+                  )
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return [(row.heart_rate, row.speed_ms) for row in result.fetchall()]
+
+    async def get_final_10min_hr(self, workout_id: int) -> list[int]:
+        """HR values from the final 10 minutes of a session for stability computation."""
+        result = await self.db.execute(
+            text("""
+                SELECT heart_rate
+                FROM workout_metrics
+                WHERE workout_id = :wid
+                  AND heart_rate IS NOT NULL
+                  AND metric_timestamp >= (
+                      SELECT MAX(metric_timestamp) - INTERVAL '10 minutes'
+                      FROM workout_metrics WHERE workout_id = :wid
+                  )
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return [row.heart_rate for row in result.fetchall()]
+
+    async def get_gradient_series(self, workout_id: int) -> list[float]:
+        """Gradient_pct values for terrain classification."""
+        result = await self.db.execute(
+            text("""
+                SELECT gradient_pct
+                FROM workout_metrics
+                WHERE workout_id = :wid AND gradient_pct IS NOT NULL
+                ORDER BY metric_timestamp
+            """),
+            {"wid": workout_id},
+        )
+        return [row.gradient_pct for row in result.fetchall()]
+
     async def get_fatigue_series(self, workout_id: int):
         """Full biomechanics time-series for fatigue signature analysis."""
         result = await self.db.execute(

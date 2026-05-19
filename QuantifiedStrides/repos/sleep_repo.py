@@ -150,6 +150,45 @@ class SleepRepo:
         )
         return result.fetchall()
 
+    async def get_resting_hr(self, user_id: int, today) -> float | None:
+        """7-day median of sleep_sessions.min_hr (rhr) for TRIMP resting HR input."""
+        result = await self.db.execute(
+            text("""
+                SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY rhr) AS median_rhr
+                FROM sleep_sessions
+                WHERE user_id = :uid
+                  AND sleep_date BETWEEN :start AND :today
+                  AND rhr IS NOT NULL
+            """),
+            {"uid": user_id, "start": today - __import__('datetime').timedelta(days=7), "today": today},
+        )
+        row = result.fetchone()
+        return float(row.median_rhr) if row and row.median_rhr else None
+
+    async def get_hrv_series_with_trimp(self, user_id: int, start, until) -> list:
+        """HRV series with preceding day TRIMP for HRV baseline quality filter."""
+        result = await self.db.execute(
+            text("""
+                SELECT
+                    s.sleep_date,
+                    s.overnight_hrv,
+                    LAG(w.day_trimp) OVER (ORDER BY s.sleep_date) AS preceding_trimp
+                FROM sleep_sessions s
+                LEFT JOIN (
+                    SELECT workout_date, SUM(trimp) AS day_trimp
+                    FROM workouts
+                    WHERE user_id = :uid AND trimp IS NOT NULL
+                    GROUP BY workout_date
+                ) w ON w.workout_date = s.sleep_date - INTERVAL '1 day'
+                WHERE s.user_id = :uid
+                  AND s.sleep_date BETWEEN :start AND :until
+                  AND s.overnight_hrv IS NOT NULL
+                ORDER BY s.sleep_date
+            """),
+            {"uid": user_id, "start": start, "until": until},
+        )
+        return result.fetchall()
+
     # ── ingestion ──────────────────────────────────────────────────────────────
 
     async def insert(self, user_id: int, data: dict) -> None:

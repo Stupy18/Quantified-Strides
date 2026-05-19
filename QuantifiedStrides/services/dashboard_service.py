@@ -34,6 +34,7 @@ from repos.checkin_repo import CheckinRepo
 from repos.environment_repo import EnvironmentRepo
 from repos.knowledge_repo import KnowledgeRepo
 from repos.narrative_repo import NarrativeRepo
+from repos.recommendation_repo import RecommendationRepo
 from repos.sleep_repo import SleepRepo
 from repos.strength_repo import StrengthRepo
 from repos.user_repo import UserRepo
@@ -59,8 +60,9 @@ class DashboardService:
         self._knowledge_repo   = KnowledgeRepo(db)
         self._narrative_repo   = NarrativeRepo(db)
 
-        self._training_load  = TrainingLoadService(workout_repo, strength_repo)
-        self._recovery       = RecoveryService(sleep_repo, strength_repo, workout_repo)
+        recommendation_repo = RecommendationRepo(db)
+        self._training_load  = TrainingLoadService(workout_repo, strength_repo, recommendation_repo)
+        self._recovery       = RecoveryService(sleep_repo, strength_repo, workout_repo, user_repo)
         self._alerts         = AlertsService(sleep_repo, workout_repo, checkin_repo)
         self._recommendation = RecommendationService(
             checkin_repo, strength_repo, workout_repo,

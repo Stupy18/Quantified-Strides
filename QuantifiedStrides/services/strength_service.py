@@ -154,8 +154,30 @@ class StrengthService:
                     "total_weight_kg":     s.total_weight_kg,
                 })
 
+        # Update pattern fatigue ledger before committing
+        await self._update_pattern_ledger(repo, user_id, session_id, payload.session_date)
         await repo.db.commit()
         return await self.get_session_detail(repo, user_id, session_id)
+
+    async def _update_pattern_ledger(
+        self,
+        repo: StrengthRepo,
+        user_id: int,
+        session_id: int,
+        session_date,
+    ) -> None:
+        """Write pattern fatigue units to pattern_fatigue_ledger for this session."""
+        try:
+            from repos.recommendation_repo import RecommendationRepo
+            rec_repo = RecommendationRepo(repo.db)
+            pattern_rows = await repo.get_session_pattern_fatigue(session_id)
+            for row in pattern_rows:
+                if row.pattern_key and row.fatigue_units:
+                    await rec_repo.upsert_pattern_fatigue_ledger(
+                        user_id, row.pattern_key, session_date, float(row.fatigue_units)
+                    )
+        except Exception as e:
+            print(f"Pattern ledger update error for session {session_id}: {e}")
 
     # ------------------------------------------------------------------
     # 1RM progression (Epley formula)

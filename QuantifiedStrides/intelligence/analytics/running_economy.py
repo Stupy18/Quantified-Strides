@@ -21,10 +21,89 @@ Three running economy metrics computed from workout_metrics time-series:
 
 from __future__ import annotations
 
+import statistics
 from typing import Optional
 
 from repos.workout_metrics_repo import WorkoutMetricsRepo
 from repos.workout_repo import WorkoutRepo
+
+
+# ---------------------------------------------------------------------------
+# Zone speed calibration
+# ---------------------------------------------------------------------------
+
+# HR zone boundaries as fraction of max_hr (standard 5-zone Garmin model)
+_ZONE_BOUNDS = [
+    (0.50, 0.60),  # Z1
+    (0.60, 0.70),  # Z2
+    (0.70, 0.80),  # Z3
+    (0.80, 0.90),  # Z4
+    (0.90, 1.00),  # Z5
+]
+_MIN_ZONE_SAMPLES = 5  # minimum data points per zone to include in output
+
+
+def compute_zone_speeds(
+    qualifying_run_data: list[dict],
+    max_hr: float,
+) -> dict:
+    """
+    Build pace ranges per terrain type per HR zone from qualifying run data.
+
+    qualifying_run_data: list of dicts, each containing:
+        terrain_type: 'road' | 'trail'
+        metrics: list of (heart_rate, speed_ms) tuples from final 10 min
+
+    Returns JSONB-ready dict:
+        {"road": {"z1": "6:30–7:30", ...}, "trail": {...}}
+
+    Zones with < _MIN_ZONE_SAMPLES readings are omitted.
+    Returns {} if no qualifying data.
+    """
+    if not qualifying_run_data or max_hr <= 0:
+        return {}
+
+    # Accumulate speed readings by terrain + zone
+    by_terrain: dict[str, dict[int, list[float]]] = {}
+
+    for run in qualifying_run_data:
+        terrain = run.get("terrain_type")
+        if not terrain:
+            continue
+        if terrain not in by_terrain:
+            by_terrain[terrain] = {i + 1: [] for i in range(5)}
+
+        for hr, speed_ms in run.get("metrics", []):
+            if not hr or not speed_ms or speed_ms <= 0:
+                continue
+            hr_frac = hr / max_hr
+            for zone_idx, (lo, hi) in enumerate(_ZONE_BOUNDS):
+                if lo <= hr_frac < hi:
+                    by_terrain[terrain][zone_idx + 1].append(float(speed_ms))
+                    break
+
+    result: dict[str, dict[str, str]] = {}
+    for terrain, zones in by_terrain.items():
+        terrain_zones: dict[str, str] = {}
+        for zone_num, speeds in zones.items():
+            if len(speeds) < _MIN_ZONE_SAMPLES:
+                continue
+            # Convert speed_ms to min/km pace, then format as "MM:SS–MM:SS"
+            paces_sec = [1000.0 / s for s in speeds]  # seconds per km
+            slow = max(paces_sec)
+            fast = min(paces_sec)
+
+            def fmt_pace(s: float) -> str:
+                m = int(s // 60)
+                sec = int(s % 60)
+                return f"{m}:{sec:02d}"
+
+            terrain_zones[f"z{zone_num}"] = f"{fmt_pace(slow)}–{fmt_pace(fast)}"
+
+        if terrain_zones:
+            result[terrain] = terrain_zones
+
+    return result
 
 
 # ---------------------------------------------------------------------------

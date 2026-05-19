@@ -26,32 +26,47 @@ To catch up after a `git pull` that added new migrations: `docker compose up` (o
 
 ## Training Load Model
 
-### Formula: TRIMP (Edwards 5-zone model)
+### Formula: TRIMP (Banister sex-specific, Story 002)
 
-Each workout contributes a training stress score calculated as:
+**Current implementation.** Each workout's TRIMP is computed post-sync and written to `workouts.trimp`:
 
 ```
-TRIMP = Σ (time_in_zone_minutes × zone_weight)
+HRr = (avg_hr - resting_hr) / (max_hr - resting_hr)   # heart-rate reserve, clamped [0,1]
+TRIMP = duration_min × HRr × k × exp(y × HRr)
 ```
 
-Zone weights (Edwards model):
-| Zone | Weight |
-|------|--------|
-| 1 | 1.0 |
-| 2 | 1.5 |
-| 3 | 2.0 |
-| 4 | 3.0 |
-| 5 | 4.0 |
+Sex-specific coefficients (Banister 1991 `[1]`):
+| Sex | k | y |
+|-----|-----|-----|
+| female | 0.86 | 1.67 |
+| male / prefer_not_to_say | 0.64 | 1.92 |
 
-Time in zones comes from Garmin (`time_in_hr_zone_1..5` stored in seconds).
+**Why Banister over Edwards:**
+The exponential term accounts for the nonlinear physiological cost at high intensities. Edwards zone-weighted TRIMP requires knowing zone boundaries (which vary per athlete) and can't distinguish between two sessions with the same zone-seconds but different HR profiles. Banister requires only avg_hr, max_hr, and resting_hr — all available from Garmin + sleep data. The sex-specific coefficients encode the known difference in female fat oxidation rate at moderate intensities. The HRV quality filter (easy_threshold = 50 TRIMP) also maps more reliably to actual training stress with Banister scores.
 
-**Fallback for strength sessions without Garmin HR data:**
-`TRIMP = total_sets × 2.5`
-Calibrated so a typical 16-set session ≈ 40 TRIMP, roughly equivalent to a moderate aerobic effort.
+**`NULL` handling:** when `avg_hr` or `max_hr` is missing, `workouts.trimp` is `NULL` and the session is excluded from load metric computation.
 
-### ATL / CTL / TSB
+`resting_hr` = 7-day median of `sleep_sessions.rhr`.
+`max_hr` = `user_profile.max_hr` (NULL until set via onboarding or quarterly cron).
 
-Exponentially weighted averages (EWA) of daily TRIMP:
+**Fallback for strength sessions without HR data:** `workouts.trimp` stays `NULL`. The `training_load_daily` computation uses only sessions with non-NULL TRIMP — no made-up strength estimates. This avoids contaminating the Banister TRIMP series with an ad-hoc set-count approximation.
+
+### ATL / CTL / TSB — Precomputed post-sync (Story 002)
+
+**Current implementation.** Computed using continuous exponential decay, NOT the EWA approximation:
+
+```python
+gap = (session_date - prev_date).days
+atl = atl * exp(-gap / TAU_ATL) + trimp * (1 - exp(-1 / TAU_ATL))
+ctl = ctl * exp(-gap / TAU_CTL) + trimp * (1 - exp(-1 / TAU_CTL))
+```
+
+TAU_ATL = 7, TAU_CTL = 42 (Morton et al. 1990 `[2]`). Marked `# HEURISTIC` in code — these are literature defaults, not validated against Vlad's personal response.
+
+**Stored in `training_load_daily`** (one row per user per day) after every successful Garmin sync. Dashboard reads from this table instead of recomputing from raw workouts — O(1) lookup instead of O(n) over 90+ days. This also stabilises recommendation inputs between syncs.
+
+**Why precomputed vs request-time:**
+Recomputing ATL/CTL/TSB on every dashboard load requires iterating 90+ days of TRIMP with async repo calls per day. With precomputed values, any request within 7 days of the last sync returns instantly without touching workout data.
 
 ```
 CTL = CTL_prev × (1 - 1/42) + load × (1/42)   # 42-day constant → fitness
@@ -68,43 +83,123 @@ TSB interpretation:
 
 ### Ramp Rate
 
-`ramp_rate = CTL_today - CTL_7_days_ago`
+`ramp_rate = ((CTL_today - CTL_14d_ago) / CTL_14d_ago) × 100`  (% change)
 
-Safe ceiling: ~5–7 CTL/week. Above 8 triggers a warning alert.
+NULL when fewer than 14 days of TRIMP data exist. Stored in `training_load_daily.ramp_rate`.
+
+Safe ceiling: ~10%/week caution, >15%/week triggers volume cap gate (Story 003). `[4]` Soligard et al. 2016.
 
 ### ACWR (Acute:Chronic Workload Ratio)
 
-`ACWR = ATL / CTL` (only computed when CTL > 5)
+`ACWR = ATL / CTL` — NULL when `CTL < 1.0` (avoid dividing by noise in the cold-start period)
 
 Optimal range: 0.8–1.3
-- `> 1.5`: high injury risk (critical alert)
-- `> 1.3`: above safe zone (warning)
-- `< 0.8`: detraining risk
+| ACWR | Label | Gate action (Story 003) |
+|------|-------|------------------------|
+| None | no_data | skip gate |
+| < 0.8 | under_training | flag only |
+| 0.8–1.3 | optimal | none |
+| 1.3–1.5 | caution | gate 2 |
+| > 1.5 | danger | gate 1 |
+| > 1.8 | critical | gate 0 |
+
+**Why NULL below CTL 1 (not CTL 5):** CTL < 1 means the athlete is essentially at rest — any non-zero ATL over near-zero CTL would produce a meaninglessly large ACWR (e.g. ATL=0.5, CTL=0.1 → ACWR=5.0). The threshold of 1.0 is more permissive than the previous "CTL > 5" guard. Changed in Story 002 per RECOMMENDATION_PROTOCOL.md §3.3.
 
 ---
 
 ## HRV Analysis
 
-### Baseline and Deviation
+### Baseline — Per-athlete stored, clean-day filtered (Story 002)
 
-7-day rolling mean and SD of overnight HRV from sleep sessions:
+**Current implementation.** The baseline is computed from clean-day readings only and stored in `user_profile.hrv_baseline_mean / hrv_baseline_sd`:
+
+**Clean reading criterion:** Preceding day's `workouts.trimp` is NULL (rest) or ≤ 50 (≈ 60–70 min easy Z2). Hard sessions and their next-day suppressed readings are excluded.
+
+**Minimum 14 clean readings** before baseline is established. `compute_hrv_status()` returns `'no_data'` until then — all HRV safety gates skip in `'no_data'` state.
+
+**Why stored per-athlete instead of rolling window:**
+A rolling window derived from the current time series is contaminated by the training stress it is measuring. During a heavy training block, suppressed HRV shifts the mean down — subsequent genuinely-bad HRV days appear "normal" because the window has already adjusted. The clean-day filter ensures the stored baseline reflects true resting HRV, not training-stressed HRV.
+
+**Why no dedicated baseline week:**
+Continuous accumulation across the training year collects clean readings naturally (rest days, easy Z2 days). Any day following a rest or easy session contributes. This makes the baseline available sooner and keeps it current without forcing the athlete into a "do-nothing week to calibrate."
 
 ```
-deviation = (last_hrv - baseline_mean) / baseline_sd
+clean_readings = [hrv for hrv, preceding_trimp in zip(series, preceding_triples)
+                  if preceding_trimp is None or preceding_trimp <= 50]
 ```
 
-SD floored at 1.0 to avoid division-by-zero for very consistent sleepers.
+Status thresholds (z-score against stored baseline):
+- `z > +1.0`: elevated (parasympathetic dominance — ready for quality)
+- `-1.0 < z ≤ +1.0`: normal
+- `-1.5 < z ≤ -1.0`: suppressed (mild withdrawal)
+- `z ≤ -1.5`: very_suppressed (Plews et al. 2012 `[5]`, Kiviniemi et al. 2007 `[6]`)
 
-Status thresholds:
-- `deviation > +0.5 SD`: elevated (good recovery signal)
-- `deviation < -1.0 SD`: suppressed (parasympathetic withdrawal)
+**Why `very_suppressed` vs `suppressed` split at -1.5:**
+The -1.5 threshold corresponds to where Plews et al. found a reliable signal-to-noise ratio for detecting genuine recovery deficit vs day-to-day HRV variance. Above -1.5 the z-score is within the normal noise band of most athletes' HRV data.
 
 ### Trend
 
-3-day mean vs 7-day mean:
+3-day mean vs 7-day mean (legacy `get_hrv_status()` — kept for backwards compatibility with dashboard until Story 003 wires `compute_hrv_status()` fully):
 - `+3 ms`: rising
 - `-3 ms`: falling
 - Otherwise: stable
+
+---
+
+## Signal Computation Layer (Story 002)
+
+### Biomechanics Fatigue Index
+
+Weighted deviation of three biomechanics metrics from per-athlete, terrain-stratified baselines stored in `biomechanics_baselines`:
+
+```
+fatigue_index = 0.50 × |cadence_dev| + 0.30 × max(0, GCT_z) + 0.20 × max(0, VR_z)
+```
+
+Weights (50/30/20) are `# HEURISTIC` — cadence is the most reliable real-time fatigue indicator (Cormack et al.), GCT rises with fatigue, vertical ratio rises with fatigue. Only positive z-scores contribute for GCT and VR (degradation, not improvement). Written to `workouts.fatigue_index` post-sync. NULL when no baseline exists for the session's terrain type — no error, no fallback.
+
+### HR Stability (zone speeds calibration gate)
+
+Coefficient of variation (CV = stdev/mean) of HR in the final 10 minutes of a running session. CV < 0.05 (< 5%) = stable steady-state HR. Qualifying sessions are used for `compute_zone_speeds()`. Written to `workouts.hr_stability_last_10min`.
+
+**Why CV < 0.05:** This threshold filters out intervals, tempo efforts, and sessions with large pace changes that would corrupt pace-per-zone measurements. A stable final 10 min indicates the athlete settled into a metabolic steady state — only then can we reliably map HR to speed.
+
+### Terrain Classification
+
+`classify_terrain()` classifies a session as `'road'` or `'trail'` from `workout_metrics.gradient_pct`. Trail criterion: mean absolute gradient > 3% OR stdev of gradient > 4%. Written to `workouts.terrain_type`. NULL when < 10 readings available.
+
+### Pattern Fatigue Residuals
+
+Per-pattern exponential decay from `pattern_fatigue_ledger`:
+
+```
+residual = Σ (fatigue_units × exp(-elapsed_hours / tau_h))
+```
+
+`tau_h` comes from `movement_patterns.fatigue_decay_tau_h` (e.g., `POWER_FULL_BODY = 72h`). Computed in-memory at request time (not stored — residuals decay continuously).
+
+**Cold-start rule (< 5 ledger sessions per pattern):** approximate from muscle freshness:
+```
+residual_approx = (1 - mean(freshness[primary_muscles])) × 3.0
+```
+The 3.0 multiplier is `# HEURISTIC`. Above 5 sessions, decay-from-ledger takes over exclusively.
+
+**Why ledger-based instead of strength_sets volume:** `strength_sets` volume (weight × reps) captures local muscle damage well but not CNS cost. The pattern ledger uses `cns_cost + local_fatigue_cost` from the `exercises` taxonomy — a two-axis model that separates neural fatigue (heavy compound lifts) from local metabolic fatigue (high-rep isolation). This distinction matters for the CSP solver: a power clean 24h ago blocks power output even if quads feel fresh.
+
+### Signal Assembly (`intelligence/signal_assembly.py`)
+
+`assemble_signals()` is the single entry point for building the full signals dict passed to `build_recommendation()`. Every key from §3.1 is present — missing values are `None`, no key omitted. Each signal call is wrapped in try/except; errors are logged and set that signal to None without propagating.
+
+**Why centralized:** the recommendation engine needs all signals simultaneously. Without a central assembly function, signal collection would be scattered across callers, making it easy to miss a key or compute signals with inconsistent timestamps. A single function also makes testing straightforward.
+
+### References
+
+`[1]` Banister EW. Modeling elite athletic performance. In: Green HJ, McDougal JD, Wenger H, eds. *Physiological Testing of Elite Athletes*. 1991.
+`[2]` Morton RH, Fitz-Clarke JR, Banister EW. Modeling human performance in running. *J Appl Physiol*. 1990.
+`[3]` Clarke DC, Skiba PF. Rationale and resources for teaching the mathematical modeling of athletic training and performance. *Adv Physiol Educ*. 2013.
+`[4]` Soligard T, et al. How much is too much? BJSM consensus statement on load. *BJSM*. 2016.
+`[5]` Plews DJ, Laursen PB, Kilding AE, Buchheit M. Heart-rate variability in elite triathletes. *Int J Sports Physiol Perform*. 2012.
+`[6]` Kiviniemi AM, et al. Endurance training guided individually by daily HRV measurements. *Eur J Appl Physiol*. 2007.
 
 ---
 
