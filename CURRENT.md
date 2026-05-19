@@ -14,7 +14,7 @@
 | Mobile — Today tab | — | dev | Active | Wired to `/dashboard` API. UI built with mock data, API wiring done. Review needed. |
 | Mobile — History tab | — | dev | Active | 90-day workout fetch implemented. |
 | Sleep readiness wiring | — | dev | Spec ready | `compute_sleep_readiness()` validated in notebook 06. Not wired into dashboard yet. Self-contained, high signal — good next task. |
-| Rec engine v2.0 implementation | — | dev | Ready to start | **Start with Story 001 (schema).** Stories on Trello. Wave order: 001 → 002 → 003/007/011 → 004/005 → 006/008–016. Spec: `docs/RECOMMENDATION_PROTOCOL.md`. |
+| Rec engine v2.0 — Story 001 schema | — | `feature/rec-engine-schema-foundation` | Validation pending | V006/V007/V008 written and committed. **Blocked on Docker validation** (`docker compose down -v && docker compose up -d` — flyway must exit 0). PR to `dev` after validation passes. |
 
 ---
 
@@ -22,7 +22,7 @@
 
 1. **Mobile white screen** — fix before adding more mobile features. Debug steps in `mobile/CLAUDE.md`.
 2. **Sleep readiness wiring** — self-contained, data-ready, no blockers. Brief in `AGENTS.md`.
-3. **Rec engine v2.0 — Story 001 (schema)** — 18 new tables, 4 ALTER TABLE extensions. Flyway migrations V006+. Story on `research` branch: `docs/user-stories/001.rec-engine-schema-foundation.md`. All downstream stories depend on this.
+3. **Rec engine v2.0 — Story 001 validation** — V006/V007/V008 migrations written on `feature/rec-engine-schema-foundation`. Run `docker compose down -v && docker compose up -d` and confirm Flyway exits 0 before opening PR to `dev`.
 
 ---
 
@@ -32,7 +32,7 @@ Planning complete. Dev team owns implementation. Stories are on Trello.
 
 | Wave | Stories | Status |
 |---|---|---|
-| 1 | 001 — Schema foundation | **Start here — unblocked** |
+| 1 | 001 — Schema foundation | **V006–V008 written — validation + PR pending** |
 | 2 | 002 — Signal computation | After 001 |
 | 3 | 003, 007, 011 — Safety gates, competition calendar, background jobs | After 002 |
 | 4 | 004, 005 — Daily rec engine, CSP solver | After 003 |
@@ -90,5 +90,6 @@ Epics in order after rec engine ships:
 | Branch | Purpose | Last active |
 |---|---|---|
 | `dev` | Integration — all feature PRs target here | Active |
+| `feature/rec-engine-schema-foundation` | Story 001 — V006/V007/V008 migrations | Active — 2026-05-19, validation pending |
 | `research` | Data science notebooks + planning artifacts | Active — rec engine stories committed 2026-05-19 |
 | `main` | Production-ready | Stable |
