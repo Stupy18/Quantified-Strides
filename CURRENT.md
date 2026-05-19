@@ -14,7 +14,7 @@
 | Mobile — Today tab | — | dev | Active | Wired to `/dashboard` API. UI built with mock data, API wiring done. Review needed. |
 | Mobile — History tab | — | dev | Active | 90-day workout fetch implemented. |
 | Sleep readiness wiring | — | dev | Spec ready | `compute_sleep_readiness()` validated in notebook 06. Not wired into dashboard yet. Self-contained, high signal — good next task. |
-| Rec engine v2.0 — Story 001 schema | — | `feature/rec-engine-schema-foundation` | Validation pending | V006/V007/V008 written and committed. **Blocked on Docker validation** (`docker compose down -v && docker compose up -d` — flyway must exit 0). PR to `dev` after validation passes. |
+| Rec engine v2.0 — Story 001 schema | — | `feature/rec-engine-schema-foundation` | PR open | V006/V007/V008 validated (Flyway exits 0, all 18 tables present, seeds correct, trigger + index verified). PR → `dev` open, awaiting review. |
 
 ---
 
@@ -32,7 +32,7 @@ Planning complete. Dev team owns implementation. Stories are on Trello.
 
 | Wave | Stories | Status |
 |---|---|---|
-| 1 | 001 — Schema foundation | **V006–V008 written — validation + PR pending** |
+| 1 | 001 — Schema foundation | **PR open → dev. Merge to unblock Wave 2.** |
 | 2 | 002 — Signal computation | After 001 |
 | 3 | 003, 007, 011 — Safety gates, competition calendar, background jobs | After 002 |
 | 4 | 004, 005 — Daily rec engine, CSP solver | After 003 |
@@ -90,6 +90,6 @@ Epics in order after rec engine ships:
 | Branch | Purpose | Last active |
 |---|---|---|
 | `dev` | Integration — all feature PRs target here | Active |
-| `feature/rec-engine-schema-foundation` | Story 001 — V006/V007/V008 migrations | Active — 2026-05-19, validation pending |
+| `feature/rec-engine-schema-foundation` | Story 001 — V006/V007/V008 migrations | PR open → dev |
 | `research` | Data science notebooks + planning artifacts | Active — rec engine stories committed 2026-05-19 |
 | `main` | Production-ready | Stable |
