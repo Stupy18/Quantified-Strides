@@ -13,7 +13,8 @@ Cycle-phase content is performance optimisation framing only.
 
 ```
 STANDARD_DISCLAIMER = (
-  "This is a training load suggestion based on your personal data. "
+  "This is a training load su
+  ggestion based on your personal data. "
   "It is not medical advice. If you experience pain, illness, or unusual "
   "fatigue, consult a qualified healthcare provider before training."
 )
@@ -808,20 +809,43 @@ Freshness < 0.4 → block that muscle group from heavy loading (> 80% 1RM).
 
 ### 3.7 Terrain Classification
 
+**Primary signal is `workouts.sport`, not gradient.** Gradient measures topography (elevation change); surface type (footing irregularity) is what drives biomechanics differences. The `sport` field captures the athlete's explicit intent at activity start — set on the Garmin device before recording begins — and is more reliable than post-hoc gradient inference. Council review confirmed: gradient confuses topography with terrain (orthogonal concepts); hilly road runs and flat trails are the canonical failure cases of gradient-only classification.
+
 ```python
-def classify_terrain(gradient_series: list[float]) -> str:
-    # gradient_series: workout_metrics.gradient_pct values for the session
-    if len(gradient_series) < 10:
-        return 'unknown'
-    pct_graded  = sum(1 for g in gradient_series if abs(g) > 3) / len(gradient_series)
-    grad_range  = max(gradient_series) - min(gradient_series)
-    return 'trail' if (pct_graded > 0.25 or grad_range > 15) else 'road'
+def classify_terrain(sport: str, gradient_series: list[float]) -> str:
+    """
+    sport == 'trail_run' → always trail (athlete's explicit declaration).
+    sport == 'running'   → road by default; gradient used only as fallback
+                           for athletes who ran trail without switching activity type.
+    Logs a warning when gradient overrides sport label — audit trail for labeling drift.
+    """
+    if sport == 'trail_run':
+        return 'trail'
+    if sport == 'running':
+        if len(gradient_series) >= 10:
+            pct_graded = sum(1 for g in gradient_series if abs(g) > 3) / len(gradient_series)
+            grad_range = max(gradient_series) - min(gradient_series)
+            if pct_graded > 0.25 or grad_range > 15:
+                logger.warning(
+                    'terrain_override: sport=running classified as trail by gradient '
+                    '(pct_graded=%.2f, grad_range=%.1f) — verify activity labeling',
+                    pct_graded, grad_range,
+                )
+                return 'trail'
+        return 'road'
+    return 'unknown'
 ```
 
 Store in `workouts.terrain_type` (VARCHAR(10), add via migration).
 **Biomechanics anomaly detection is always terrain-stratified. Pooling road and trail
 produces false-positive fatigue flags.** (Confirmed in notebooks 01–04: trail increases
 GCT +12–18%, reduces cadence −8–12 spm vs road at identical HR effort.)
+
+**Migration note:** When this implementation is first deployed, run a backfill query to
+reclassify all existing `workouts` rows using the new logic, then recompute
+`biomechanics_baselines`. Verify post-migration that per-terrain mean GCT and cadence
+values match the notebook-confirmed deltas — convergence confirms prior baselines were
+contaminated by gradient-only misclassification.
 
 ---
 
@@ -1156,14 +1180,37 @@ def aggregate_readiness(
 
 ### 5.2 Session type decision matrix
 
-| Readiness | TSB | → Session type |
-|-----------|-----|----------------|
-| peak | > 5 | Quality: intervals / threshold / heavy strength |
-| good | ≥ −5 | Moderate: tempo / aerobic / moderate strength |
-| good | < −5 | Aerobic base + light strength maintenance |
-| moderate | any | Z2 + light strength only |
-| low | any | Z1 active recovery or rest |
-| rest | any | Rest |
+Aerobic and strength session intensity are gated by **different signals**. TSB measures aerobic fatigue only (computed from running TRIMP) and must never gate strength prescription. Mixing them was the prior design; the matrices below are the corrected version.
+
+**Aerobic matrix — gated by `readiness_level` + TSB:**
+
+| Readiness | TSB | → Aerobic session type |
+|-----------|-----|------------------------|
+| peak | > 5 | Intervals / threshold eligible |
+| peak | ≤ 5 | Tempo / aerobic (quality, not intensity) |
+| good | ≥ −5 | Tempo / aerobic |
+| good | < −5 | Z2 aerobic base |
+| moderate | any | Z2 only |
+| low / rest | any | Z1 / rest |
+
+An athlete in a normal 8-week base-building block will have `tsb < 5` for most of it — this is expected. The aerobic matrix handles this by capping at tempo/aerobic rather than intervals.
+
+**Strength matrix — gated by `readiness_level` + `pattern_fatigue_residuals`. TSB is NOT used here:**
+
+| Readiness | Pattern residual | HRV floor | → Strength session type |
+|-----------|-----------------|-----------|-------------------------|
+| peak / good | < 1.5 (fresh) | hrv_z ≥ −0.5 | Heavy compound, full goal intensity |
+| peak / good | 1.5–3.0 (fatigued) | any | Moderate strength |
+| peak / good | > 3.0 (depleted) | any | Light / deload |
+| moderate | any | any | Light strength regardless of residuals |
+| low / rest | any | any | Skip or mobility only |
+
+The HRV floor (`hrv_z ≥ −0.5`) on the heavy compound row catches systemic CNS fatigue that pattern residuals (movement-specific) cannot see. If HRV is suppressed, cap at moderate even when residuals are fresh.
+
+**Pattern fatigue residuals — three-tier cold-start fallback:**
+1. `pattern_fatigue_ledger` has ≥ 5 entries for this pattern → use ledger-based exponential decay (normal path)
+2. `pattern_fatigue_ledger` has < 5 entries but `strength_sets` data exists (user backlogged sessions) → `residual_approx = (1 − mean(freshness[primary_muscles])) × 3.0`
+3. Both ledger and `strength_sets` are empty for this pattern (true cold start — user has never logged a session for this movement) → default to `moderate`, never `heavy`
 
 ### 5.3 Concurrent training rules
 
@@ -1279,59 +1326,84 @@ generated by the daily engine — they come from the plan generator (§14–§16
 
 ## 6. Female Athlete Protocol
 
-Only active when `user_profile.sex == 'female'`.
-`cycle_modifier_scale()` returns 0.0 when `hormonal_contraception IS NULL` → no modifiers.
+Only active when `user_profile.biological_sex == 'female'` AND `user_profile.hormonal_contraception IS NOT TRUE`.
 
-### 6.1 Phase modifiers
+`hormonal_contraception = TRUE` → all cycle modifiers disabled. Combined oral contraceptives suppress endogenous hormonal variation; the phase model does not apply.
+
+### 6.1 Phase map and physiology
+
+Cycle phases anchored to **cycle day 1 = first day of menstruation**. Phase boundaries scale proportionally to the athlete's **personal median cycle length** (computed from last 6 logged `menstrual_cycles` rows). Default 28 days until 3 cycles are logged.
+
+| Phase | Days (28d ref) | Key physiology |
+|---|---|---|
+| Menstrual | 1–5 | Prostaglandins peak days 1–3 → dysmenorrhea in susceptible athletes. HRV not systematically suppressed in eumenorrheic athletes. |
+| Follicular | 6–13 | Rising estrogen → anabolic signaling, peak satellite cell activity, best glycogen synthesis. Optimal adaptation window. `[14]` |
+| Ovulatory | 14–16 | LH surge → peak neuromuscular efficiency. Ligamentous laxity +2–5 mm at knee (real but modest). `[15]` |
+| Early luteal | 17–22 | Progesterone thermogenic: core temp +0.3–0.5°C, elevated RPE at identical HR, increased ventilatory drive. |
+| Late luteal | 23–28 | Progesterone + estrogen fall. Sleep quality degrades. HRV suppression is organic (not training-derived) — distinguishable from load suppression by TSB context. |
+
+### 6.2 Prescription modifiers per phase
+
+The cycle modifier layer sits **between** `readiness_composite()` and the final prescription. It operates at prescription level — it changes what a `readiness_level` label prescribes but does not change the label itself. `readiness_level` is never overwritten by cycle phase alone.
+
+**Menstrual (days 1–5):**
+- No algorithmic intensity cap for all athletes
+- Athletes with `user_profile.menstrual_dysmenorrhea = TRUE`: if `overall_feel ≤ 2` → one-step readiness downgrade (e.g., `'good'` → `'moderate'`). Gate active days 1–5, strongest days 1–3, tapering by day 5
+- CSP solver deprioritises novel movement patterns days 1–3 (prostaglandin-elevated inflammation increases DOMS from first-exposure exercises). Prefer established rotation
+
+**Follicular (days 6–13):**
+- No penalty, no restriction
+- If `readiness_level ≥ 'good'` AND `strength_goal in ('hypertrophy', 'strength')`: **+1 working set per compound movement**, capped at +20% total session volume. Mechanism: estrogen-enhanced satellite cell activity increases stimulus-to-adaptation ratio `[14]`
+- Bonus suspended when `readiness_level < 'good'`
+
+**Ovulatory (days 14–16):**
+- Plyometrics and explosive lower-body patterns: **soft gate** — eligible if `readiness_composite > 0.8`; always accompanied by awareness cue: *"Knee laxity is slightly elevated this week — prioritise landing mechanics and avoid maximal jump volume."*
+- This is awareness, not exclusion. Effect sizes in prospective injury studies are modest and confounded `[15]`
+- Knee-dominant compound loading (squat, lunge, single-leg RDL): reduce by 10% from recent working weight
+
+**Early luteal (days 17–22):**
+- Threshold and tempo aerobic sessions: lower HR target ceiling by **3–5 bpm**
+- Mechanism: progesterone thermogenic effect causes cardiovascular drift — same HR = higher physiological stress than established zones reflect. This is a **zone calibration offset**, not a readiness penalty. `readiness_level` label unchanged. Affects aerobic prescription only.
+
+**Late luteal (days 23–28):**
+- HRV suppression is organic, not training-derived. **Do not mask it.** Surface coaching cue: *"Your HRV is in a natural low point for this phase of your cycle. Recovery window — prioritise effort feel over zone targets this week."*
+- Follicular volume bonus does not apply
+- No additional volume cuts unless `readiness_level` independently calls for them
+
+### 6.3 Contradictory signal handling
+
+**HRV suppressed during follicular:** HRV wins on safety. Follicular bonus suspended. Anomaly cue: *"Your HRV is lower than typical for this cycle phase. Consider an extra recovery day. If persistent, check for illness or overtraining."*
+
+**HRV elevated during late luteal:** Organic suppression cue does not fire. Prescription proceeds normally.
+
+**Ovulatory awareness cue + suppressed readiness:** Plyometrics already excluded by readiness gate; awareness cue suppressed too.
+
+### 6.4 Data quality and graceful decay
+
+- Personal median cycle length from last 6 `menstrual_cycles` rows. If median outside 21–35 days, flag irregular
+- Modifier strength decays linearly from day `(median + 3)` to `(median + 9)`. Fully disabled from day `(median + 10)` with notification: *"No recent cycle data — using baseline recommendations."*
+- `hormonal_contraception = TRUE` → all modifiers disabled immediately
+
+### 6.5 RED-S and bone stress fracture risk flags
+
+**RED-S risk flag** — all three simultaneously:
+1. ATL ramp rate > 10%/week for 3+ consecutive weeks
+2. 7-day rolling sleep score slope negative
+3. Most recent two cycle lengths > 32 days
+
+Response: cap aerobic at Z2, surface narrative alert directing to sports medicine physician. Not a diagnosis.
+
+**Bone stress fracture risk flag** — both simultaneously:
+1. Recommended mileage increase > 15% for two consecutive weeks
+2. Cycle gaps > 35 days
+
+Response: cap mileage increase at 10%, surface warning. Mechanism: estrogen deficiency (cycle disruption) reduces bone mineral density, elevating tibial and metatarsal stress fracture risk.
+
+Both flags require `user_profile.biological_sex = 'female'`. Neither fires for other users.
 
 ```python
-PHASE_MODIFIERS = {
-    'menstruation': {
-        'intensity_scale':  0.80,   # -20% intensity
-        'block_heavy_lower': True,
-        'note': 'Menstruation — reduced intensity; avoid heavy lower body',
-    },
-    'follicular': {
-        'intensity_scale':  1.00,   # no reduction; best adaptation window
-        'strength_priority': True,
-        'note': 'Follicular — peak strength adaptation window; prioritise quality sessions',
-    },
-    'ovulation': {
-        'intensity_scale':  1.00,
-        'acl_flag': True,
-        'note': 'Ovulation — peak performance; ACL awareness flag active',
-    },
-    'early_luteal': {
-        'intensity_scale':  0.90,   # -10% volume
-        'hydration_note':    True,
-        'note': 'Early luteal — slight volume reduction; hydration priority',
-    },
-    'late_luteal': {
-        'intensity_scale':  0.75,   # -25% intensity; no new maximal efforts
-        'block_max_effort':  True,
-        'note': 'Late luteal — recovery priority; no maximal efforts',
-    },
-}
-# [14] McNulty et al. 2020 (meta-analysis) — follicular = peak adaptation
-# [15] Williams et al. 2011 — elevated ACL laxity at ovulation
-
-def apply_cycle_modifiers(rec: dict, phase: str | None, scale: float) -> dict:
-    if phase is None or scale == 0.0:
-        return rec
-    mods = PHASE_MODIFIERS[phase]
-    rec  = dict(rec)
-    rec['duration_min']  = round(rec.get('duration_min', 60) * (1 - (1 - mods['intensity_scale']) * scale))
-    rec['cycle_note']    = mods['note']
-    if mods.get('acl_flag') and scale > 0.0:
-        rec.setdefault('flags', []).append({
-            'type': 'acl_risk_awareness',
-            'message': (
-                "You're near your ovulation window. Research indicates elevated knee "
-                "laxity at this phase (Williams et al. 2011). Prioritise a dynamic "
-                "warm-up and focus on landing mechanics during high-impact movements."
-            ),
-        })
-    return rec
+# [14] McNulty et al. 2020 (meta-analysis) — follicular = peak strength adaptation
+# [15] Williams et al. 2011 — elevated ACL laxity at ovulation; Slauterbeck 2002
 ```
 
 ---
@@ -1456,7 +1528,7 @@ def build_strength_session(
 3. `pattern_not_depleted`: `pattern_residuals[primary_pattern] <= 3.0`
 4. `recency_gap`: `days_since_last_used >= min_gap` (3d if `cns_cost >= 4.0` else 1d; `None` = eligible)
 5. `session_type_match`: upper session excludes `KNEE_DOMINANT` and `HIP_HINGE` as primary slots (eligible as accessory); lower excludes `HORIZONTAL_PUSH`, `HORIZONTAL_PULL`, `VERTICAL_PUSH`, `VERTICAL_PULL` as primary slots
-6. `no_heavy_lower_if_flagged`: if `cycle_phase in ('menstruation', 'late_luteal')` and `primary_pattern in ('KNEE_DOMINANT', 'HIP_HINGE')` → exclude high-load slots (`skill_level >= 2` and `cns_cost >= 3.5`)
+6. `ovulatory_plyometric_gate`: if `cycle_phase == 'ovulatory'` and `movement_pattern in ('plyometric', 'explosive_lower')` and `readiness_composite ≤ 0.8` → hard-exclude from candidate pool. When `readiness_composite > 0.8`, plyometrics are eligible but an awareness cue is always appended to `flags`: *"Knee laxity is slightly elevated this week — prioritise landing mechanics and avoid maximal jump volume."* Note: if plyometrics are already excluded by the readiness gate, the cue is suppressed (nothing to flag for a session that isn't happening).
 7. `no_strength_gate`: if `gate_result` and `gate_result['no_strength']` → return `[]`
 8. `goal_pattern_exclusion`: if pattern is in `goal_deprioritized` for the current goal **and** `pattern_residuals[primary_pattern] > 1.0` (fatigued) → hard-exclude from primary slots. At residual ≤ 1.0 (fresh), pattern remains eligible — freshness overrides deprioritization. For `combination`: exclude from primary slots only if blended net priority score < −0.2 **and** residual > 1.0.
 
@@ -1607,28 +1679,27 @@ longer observation periods.
 
 ## 8. Running Prescription
 
+`prescribe_run()` is a **detail function**: it receives a zone that has already been determined by `adapt_session_to_signals()` (plan-driven or ad-hoc) and translates it into a concrete prescription — pace targets, HR ceiling, duration. It does not own zone selection; it only enforces safety-gate caps and biomechanics overrides on top of the zone it receives.
+
 ```python
-ZONE_DURATION_CAPS = {1: 60, 2: 90, 3: 60, 4: 50, 5: 40}   # minutes
+ZONE_DURATION_CAPS = {1: 60, 2: 90, 3: 60, 4: 50, 5: 40}   # minutes (maximum)
+ZONE_DURATION_MINS = {1: 15, 2: 20, 3: 20, 4: 20, 5: 15}   # minutes (minimum useful session)
 ZONE_LABELS        = {1:'active_recovery', 2:'aerobic_base',
                       3:'aerobic_threshold', 4:'threshold', 5:'vo2max'}
 
 def prescribe_run(
-    readiness_level:         str,
-    tsb:                     float | None,
+    zone:                    int,            # pre-determined by adapt_session_to_signals()
     gate_max_zone:           int   | None,   # from safety gate, if fired
     time_available_min:      int,
     terrain:                 str,
-    zone_speeds:             dict,
-    fatigue_index:           float | None,   # from last run
-    hr_decoupling_recent:    float | None,   # % from last Z2 run
+    zone_speeds:             dict,           # terrain-stratified; from user_profile.zone_speeds
+    fatigue_index:           float | None,   # from last run; > 1.0 → cap zone at 2
+    hr_decoupling_recent:    float | None,   # % from last Z2 run; > 5.0 → cap zone at 2
+    max_hr:                  int   | None,   # user's max HR; used to compute hr_ceiling_bpm
+    hr_zone_ceiling_offset:  int   | None,   # bpm to subtract from ceiling (early luteal: -3 to -5)
 ) -> dict:
 
-    base = {'peak':4,'good':3,'moderate':2,'low':1,'rest':1}[readiness_level]
-    zone = base
-
-    if tsb is not None and tsb < -5 and zone >= 3:
-        zone = 2
-
+    # Safety gate (hard cap from gate_result)
     if gate_max_zone is not None:
         zone = min(zone, gate_max_zone)
 
@@ -1640,16 +1711,90 @@ def prescribe_run(
     if hr_decoupling_recent is not None and hr_decoupling_recent > 5.0:
         zone = min(zone, 2)
 
-    duration    = min(time_available_min, ZONE_DURATION_CAPS[zone])
-    pace_range  = zone_speeds.get(terrain, {}).get(f'z{zone}')   # None = output zone only
+    duration = min(time_available_min, ZONE_DURATION_CAPS[zone])
+    # Redirect if remaining time is below minimum useful threshold for this zone
+    if duration < ZONE_DURATION_MINS[zone] and zone >= 3:
+        zone = 2
+        duration = min(time_available_min, ZONE_DURATION_CAPS[2])
+
+    pace_range = zone_speeds.get(terrain, {}).get(f'z{zone}')  # None = output zone only
+
+    # HR ceiling: zone boundaries expressed as % of max_hr (5-zone model)
+    ZONE_HR_CEILING_PCT = {1: 0.60, 2: 0.70, 3: 0.80, 4: 0.90, 5: 1.00}
+    hr_ceiling_bpm = None
+    if max_hr is not None:
+        hr_ceiling_bpm = int(max_hr * ZONE_HR_CEILING_PCT[zone])
+        if hr_zone_ceiling_offset is not None and zone >= 3:
+            # Early luteal: lower ceiling without changing zone label
+            hr_ceiling_bpm = hr_ceiling_bpm + hr_zone_ceiling_offset  # offset is negative (e.g. -4)
 
     return {
-        'zone':         zone,
-        'duration_min': duration,
-        'pace_range':   pace_range,
-        'session_type': ZONE_LABELS[zone],
-        'terrain':      terrain,
+        'zone':             zone,
+        'duration_min':     duration,
+        'pace_range':       pace_range,
+        'hr_ceiling_bpm':   hr_ceiling_bpm,
+        'session_type':     ZONE_LABELS[zone],
+        'terrain':          terrain,
     }
+```
+
+**`zone_speeds` source:** Terrain-stratified personal baselines stored in `user_profile.zone_speeds` (JSONB). Computed monthly by `compute_zone_speeds()` (§14 background jobs). Structure: `{"road": {"z1": "7:30–8:00", "z2": "6:30–7:00", ...}, "trail": {...}}`. Null when < 5 qualifying runs exist per zone per terrain — prescription outputs zone label only.
+
+**`hr_zone_ceiling_offset` source:** Injected by `apply_cycle_modifiers()` when `cycle_phase == 'early_luteal'`. Value is −3 to −5 bpm (negative integer). `None` for all other phases.
+
+---
+
+### 8a. Cycle Modifier Application
+
+`apply_cycle_modifiers()` runs after `adapt_session_to_signals()` and before `assemble_recommendation()`. It modifies the session dict in place and appends to the flags list.
+
+```python
+def apply_cycle_modifiers(
+    session:             dict,           # from adapt_session_to_signals()
+    cycle_phase:         str,            # 'menstrual'|'follicular'|'ovulatory'|'early_luteal'|'late_luteal'
+    cycle_modifier_scale: float,         # 0.0–1.0 decay weight from §6.4; 0.0 = modifiers disabled
+    readiness_level:     str,
+    strength_goal:       str,
+    hrv_z:               float | None,
+    tsb:                 float | None,
+    flags:               list,           # mutable — coaching cues appended here
+) -> dict:
+    if cycle_modifier_scale == 0.0:
+        return session
+
+    if cycle_phase == 'follicular':
+        # +1 set per compound if readiness ≥ good and hypertrophy/strength goal
+        if readiness_level in ('peak', 'good') and strength_goal in ('hypertrophy', 'strength'):
+            session['follicular_set_bonus'] = True  # honored by build_strength_block()
+        # Anomaly: HRV suppressed in follicular
+        if hrv_z is not None and hrv_z < -1.0:
+            session['follicular_set_bonus'] = False
+            flags.append({'type': 'cycle_anomaly',
+                          'message': 'Your HRV is lower than typical for this cycle phase. '
+                                     'Consider an extra recovery day. If persistent, check for '
+                                     'illness or overtraining.'})
+
+    elif cycle_phase == 'early_luteal':
+        # HR ceiling offset for threshold/tempo sessions
+        if session.get('zone', 0) >= 3:
+            offset = int(round(-4 * cycle_modifier_scale))  # -3 to -5 bpm range; center at -4
+            session['hr_zone_ceiling_offset'] = offset
+            flags.append({'type': 'cycle_hr_offset',
+                          'message': f'HR ceiling adjusted {offset} bpm — progesterone elevates '
+                                     'cardiovascular drift at this phase of your cycle.'})
+
+    elif cycle_phase == 'late_luteal':
+        # Surface HRV coaching cue when HRV is organically suppressed
+        # Condition: HRV suppressed AND TSB > -10 (not load-driven)
+        if hrv_z is not None and hrv_z < -1.5 and (tsb is None or tsb > -10):
+            flags.append({'type': 'cycle_hrv_note',
+                          'message': 'Your HRV is in a natural low point for this phase of your '
+                                     'cycle. Recovery window — prioritise effort feel over zone '
+                                     'targets this week.'})
+        # Ensure follicular bonus is explicitly off
+        session['follicular_set_bonus'] = False
+
+    return session
 ```
 
 ---
@@ -1700,13 +1845,14 @@ interface Recommendation {
   confidence:        number;           // 0.0–1.0
 
   recommendation: {
-    primary_sport:   string | null;
-    session_type:    string | null;
-    zone:            number | null;    // 1–5
-    duration_min:    number | null;
-    pace_range:      string | null;    // "5:45–6:30 /km" or null
-    intensity_note:  string | null;
-    terrain:         string | null;
+    primary_sport:      string | null;
+    session_type:       string | null;
+    zone:               number | null;    // 1–5
+    duration_min:       number | null;
+    pace_range:         string | null;    // "5:45–6:30 /km" or null
+    hr_ceiling_bpm:     number | null;    // max_hr × zone_pct − cycle_offset; null when max_hr unknown
+    intensity_note:     string | null;
+    terrain:            string | null;
   };
 
   strength_block: {
@@ -1840,18 +1986,34 @@ personalised than usual. Accuracy improves as more sessions are logged."*
 - Running: Z1–Z2 only for first 2 weeks
 - All gates except injury signal suppressed until CTL > 0
 
+### Beginner strength onboarding phase
+
+An athlete is a **beginner** for strength purposes if `COUNT(strength_sessions) < 4` at plan creation. This matches the pattern fatigue cold-start threshold (§5.2 tier 3).
+
+**Two-week exploratory phase** (`phase = 'onboarding'`) is prepended to the plan before Base begins:
+- `split_key = 'full_body'` always — all movement pattern families covered each session
+- Weight target: RPE 5–6, never to failure
+- One working set per movement pattern family (CSP selects lowest `skill_level` exercise per pattern)
+- Normal phase eligibility, split selection, and intensity logic do not apply
+
+**Diagnostic output:** After two weeks, RPE per set at given weights produces a pattern weakness profile. Patterns with high RPE at low absolute load are flagged as primary development targets. Stored in `user_profile.pattern_weakness_profile JSONB`. Used by CSP solver to weight exercise selection in the first Base mesocycle.
+
+**Transition:** `user_profile.strength_onboarding_complete = TRUE` set after both onboarding weeks complete. `select_split()` called normally from week 3 onward.
+
 ### Required onboarding fields
 
 ```
-training_status       untrained | recreational | trained | elite
-goal                  athlete | strength | hypertrophy
-sex                   male | female | prefer_not_to_say
-date_of_birth         date
-gym_days_week         int (2–6)
-primary_sports        JSONB
+training_status            untrained | recreational | trained | elite
+goal                       athlete | strength | hypertrophy
+biological_sex             male | female | prefer_not_to_say
+date_of_birth              date
+gym_days_week              int (2–6)
+primary_sports             JSONB
+preferred_split            optional TEXT (can be set here or later)
 
-# Shown only when sex == 'female':
-hormonal_contraception  Yes (TRUE) | No (FALSE) | Prefer not to say (NULL)
+# Shown only when biological_sex == 'female':
+hormonal_contraception     Yes (TRUE) | No (FALSE) | Prefer not to say (NULL)
+menstrual_dysmenorrhea     Yes (TRUE) | No (FALSE) | Prefer not to say (NULL)
 ```
 
 ---
@@ -1872,7 +2034,7 @@ These are the minimum acceptance tests for the recommendation engine. Each scena
 | T8 | Injury — moderate, cross_training_ok=True | `training_state='injured'`, `injury.severity='moderate'` | Session source = `cross_training`, only non-impact activities recommended |
 | T9 | Return to run — week 1 | `training_state='return_to_run'`, week 1 | Only `easy_run` or `active_recovery` suggested, no Z3+ |
 | T10 | Open-ended plan, Z2 TID drift | `easy_pct_actual=0.55`, `easy_pct_target=0.80` | TID guardrail fires, quality session downgraded to easy run |
-| T11 | Female, late luteal | `cycle_phase='late_luteal'`, `hormonal_contraception=False` | `intensity_scale=0.75` applied, `block_max_effort=True` in modifiers |
+| T11 | Female, late luteal | `cycle_phase='late_luteal'`, `hormonal_contraception=False` | Late luteal HRV coaching cue surfaced if HRV suppressed; no intensity cap applied by default; follicular bonus not applied |
 | T12 | Null sleep only | `sleep_readiness='no_data'`, `hrv_status='elevated'` | `readiness_level` derived from HRV alone; output contract complete, no missing keys |
 | T13 | No biomechanics baseline | `biomechanics_baseline=None` | `modifiers_applied.biomechanics_fatigue=null`, no running zone cap, `confidence` deducted 0.10 |
 | T14 | Pre-competition 48h, A-race | `days_to_competition=1`, `competition_priority='A'` | Gate 4 fires, `no_strength=True`, `max_zone=2` |
@@ -1896,6 +2058,9 @@ These are the minimum acceptance tests for the recommendation engine. Each scena
 | Open-ended plan auto-extension | Weekly cron (Sunday night) | `generate_open_ended_plan()` | `training_plan_weeks` | < 5s |
 | Plan revision on HRV suppression | Post ATL/CTL/TSB job (if Gate 2 triggered) | `compute_resume_phase()` + shift plan weeks | `training_plan_weeks` | < 3s |
 | CTL decay during injury | Daily cron while `training_state = 'injured'` | `pre_injury_ctl * exp(-days / 42.0)` → cached | `training_plans` | < 1s |
+| Weekly taper TSB projection | Weekly cron (Monday, `plan_mode='race_anchored'`, `training_state='tapering'`) | `project_race_day_tsb()` → compare to [5,20] | `training_plans.projected_race_day_tsb` + alerts | < 2s |
+| Open-ended deload evaluation | Daily cron (open-ended plans only) | Check 7 deload triggers (§15.1); insert deload week if any fires | `training_plan_weeks` + `open_ended_load_week_counter` | < 1s |
+| Split re-evaluation on goal change | Post `user_profile.strength_goal` update | Re-run `select_split()` for all future non-overridden `training_plan_weeks`; clear stale conflict alerts | `training_plan_weeks.split_key` | < 2s |
 
 **Open-ended auto-extension:** When the active open-ended plan's last `training_plan_weeks` row falls within 2 weeks, the job generates the next 16-week rolling cycle anchored to current CTL. Volume ceiling stays at 80% of tier peak. No user interaction required.
 
@@ -2176,7 +2341,9 @@ def assign_weekly_volumes(
     phases:          list[dict],
     start_volume_km: float,
     peak_volume_km:  float,
-    mesocycle_weeks: int,       # 3, 4, or 5 from plan_goal_tiers
+    mesocycle_weeks: int,         # 3, 4, or 5 from plan_goal_tiers
+    pre_taper_ctl:   float | None = None,   # CTL at start of taper; None → fixed fallback
+    pre_taper_atl:   float | None = None,   # ATL at start of taper; None → fixed fallback
 ) -> list[float]:
     volumes = []
     load_weeks = mesocycle_weeks - 1   # 2, 3, or 4 loading weeks before cutback
@@ -2184,9 +2351,18 @@ def assign_weekly_volumes(
 
     for phase in phases:
         if phase['phase'] == 'taper':
-            # Linear drop regardless of mesocycle_weeks
-            for j in range(phase['weeks']):
-                volumes.append(round(peak_volume_km * (0.80 - 0.15 * j), 1))
+            if pre_taper_ctl is not None and pre_taper_atl is not None:
+                # TSB-anchored taper: find volume schedule that lands TSB in [5, 20] on race day
+                taper_kms, _ = compute_taper_volume_schedule(
+                    pre_taper_ctl, pre_taper_atl,
+                    taper_weeks=phase['weeks'],
+                    peak_km=peak_volume_km,
+                )
+                volumes.extend(taper_kms)
+            else:
+                # Fallback when CTL/ATL not yet available (plan preview before first sync)
+                for j in range(phase['weeks']):
+                    volumes.append(round(peak_volume_km * (0.75 - 0.15 * j), 1))
             continue
         for w in range(phase['weeks']):
             if w % mesocycle_weeks < load_weeks:   # loading week
@@ -2202,7 +2378,101 @@ def assign_weekly_volumes(
         if volumes[i] > volumes[i - 1] * 1.10:
             volumes[i] = round(volumes[i - 1] * 1.10, 1)
     return volumes
-```
+
+
+def project_race_day_tsb(
+    current_ctl:  float,
+    current_atl:  float,
+    daily_trimp:  float,   # assumed constant over projection window
+    days:         int,
+) -> float:
+    """
+    Projects TSB forward assuming constant daily TRIMP input.
+    Used at plan creation time and weekly during taper to verify TSB trajectory.
+
+    Called at plan creation to validate the taper schedule will hit [5, 20].
+    Called by the weekly taper-check background job (§12) with actual CTL/ATL
+    to detect drift and surface alerts.
+    """
+    TAU_ATL, TAU_CTL = 7.0, 42.0
+    a_atl = exp(-1 / TAU_ATL)
+    a_ctl = exp(-1 / TAU_CTL)
+    atl, ctl = current_atl, current_ctl
+    for _ in range(days):
+        atl = atl * a_atl + daily_trimp * (1 - a_atl)
+        ctl = ctl * a_ctl + daily_trimp * (1 - a_ctl)
+    return round(ctl - atl, 2)
+
+
+def compute_taper_volume_schedule(
+    pre_taper_ctl:  float,
+    pre_taper_atl:  float,
+    taper_weeks:    int,
+    peak_km:        float,
+    target_tsb:     float = 12.0,   # HEURISTIC: midpoint of 5–20 optimal window
+    tsb_min:        float = 5.0,    # HEURISTIC: under-tapered below this
+    tsb_max:        float = 20.0,   # HEURISTIC: over-tapered / detrained above this
+    min_volume_pct: float = 0.40,   # never drop below 40% of peak — neuromuscular maintenance
+) -> tuple[list[float], float]:
+    """
+    Finds the taper volume schedule that lands TSB in [tsb_min, tsb_max] on race day,
+    targeting target_tsb.
+
+    Volume is progressive: each subsequent taper week is 15% lower than the prior,
+    anchored by a first-week fraction found via binary search over [min_volume_pct, 0.90].
+
+    Returns (weekly_km_list, projected_race_day_tsb).
+
+    Fallback: if binary search cannot find a schedule landing in [tsb_min, tsb_max]
+    (can happen when pre_taper_atl is already very low — athlete is close to fresh at
+    peak), returns fixed percentages [75%, 60%, 45%] of peak_km. This is rare in
+    practice because an athlete truly fresh at taper start has pre_taper_tsb already
+    near target, so any modest taper will land in range.
+
+    TSB range rationale:
+      < 5:  under-tapered — residual fatigue will blunt race performance
+      5–10: acceptable — slight fatigue residual; used for B-races
+      10–15: optimal — peak form; most athletes respond best here
+      15–20: acceptable — recreational athletes tolerate higher TSB without detraining
+      > 20: over-tapered — CTL has decayed meaningfully; fitness loss outweighs freshness gain
+    """
+    KM_PER_TRIMP = 9.0   # 1 easy km ≈ 9 TRIMP (§14.3)
+    TAU_ATL, TAU_CTL = 7.0, 42.0
+    a_atl = exp(-1 / TAU_ATL)
+    a_ctl = exp(-1 / TAU_CTL)
+
+    def simulate(first_week_pct: float) -> tuple[list[float], float]:
+        week_pcts = [max(min_volume_pct, first_week_pct * (0.85 ** w))
+                     for w in range(taper_weeks)]
+        week_kms  = [round(peak_km * p, 1) for p in week_pcts]
+        ctl, atl  = pre_taper_ctl, pre_taper_atl
+        for km in week_kms:
+            d = (km / KM_PER_TRIMP) / 7   # daily TRIMP for this week
+            for _ in range(7):
+                atl = atl * a_atl + d * (1 - a_atl)
+                ctl = ctl * a_ctl + d * (1 - a_ctl)
+        return week_kms, round(ctl - atl, 2)
+
+    # Binary search: lower first_week_pct → less volume → ATL drops more → higher TSB
+    lo, hi = min_volume_pct, 0.90
+    best_kms, best_tsb = simulate((lo + hi) / 2)
+    for _ in range(20):   # 20 iterations → precision < 0.001
+        mid = (lo + hi) / 2
+        kms, tsb = simulate(mid)
+        if abs(tsb - target_tsb) < abs(best_tsb - target_tsb):
+            best_kms, best_tsb = kms, tsb
+        if tsb < target_tsb:
+            hi = mid   # TSB too low → need less volume → lower hi
+        else:
+            lo = mid   # TSB too high → need more volume → raise lo
+
+    if not (tsb_min <= best_tsb <= tsb_max):
+        # Fallback: fixed percentages
+        fallback_pcts = [0.75 - 0.15 * w for w in range(taper_weeks)]
+        best_kms = [round(peak_km * p, 1) for p in fallback_pcts]
+        _, best_tsb = simulate(fallback_pcts[0])
+
+    return [round(v, 1) for v in best_kms], best_tsb
 
 **Long run progression (applied within the weekly volume allocation):**
 Long run grows approximately +1.5 km every 1–2 weeks. Independent cutback every 4–5 long-run cycles (coordinate with mesocycle cutback where possible). `[27]`
@@ -2481,8 +2751,16 @@ async def build_recommendation(
     session = adapt_session_to_signals(spec, signals)
 
     if signals.get('cycle_phase') and signals.get('cycle_modifier_scale', 0.0) > 0:
-        session = apply_cycle_modifiers(session, signals['cycle_phase'],
-                                        signals['cycle_modifier_scale'])
+        session = apply_cycle_modifiers(
+            session=session,
+            cycle_phase=signals['cycle_phase'],
+            cycle_modifier_scale=signals['cycle_modifier_scale'],
+            readiness_level=signals['readiness_level'],
+            strength_goal=signals.get('strength_goal', 'sport_support'),
+            hrv_z=signals.get('hrv_z'),
+            tsb=signals.get('tsb'),
+            flags=flags,
+        )
 
     strength = await build_strength_block(plan_context, signals, today)
 
@@ -2564,6 +2842,120 @@ class PlanResponse(BaseModel):
 
 ---
 
+### 14.12 Strength Split Catalog and Weekly Selection
+
+The split is the structural template for how gym sessions are distributed across the week. It is assigned weekly (stored on `training_plan_weeks.split_key`), not locked to the plan — it re-evaluates each week as gym availability, phase, and fatigue context change.
+
+**Split catalog:**
+
+| split_key | min_days | max_days | concurrent_risk | volume_freq | max_concurrent_aerobic_days | Notes |
+|---|---|---|---|---|---|---|
+| `full_body_maintenance` | 1 | 2 | Low | Low | 5 | Maintenance / deload; all pattern families touched lightly |
+| `upper_only_maintenance` | 1 | 2 | Low | Low | 5 | Peak/Taper when lower body must stay fresh for running |
+| `full_body` | 2 | 3 | Medium | Medium | 4 | Default beginner + Base phase; balanced stimulation |
+| `upper_lower` | 3 | 4 | Medium | Medium | 3 | Most common intermediate split; alternates upper/lower |
+| `push_pull_legs` | 3 | 4 | Medium-High | High | 2 | High frequency stimulus; viable in Build for hybrid athletes |
+| `push_pull_lower_upper` | 4 | 5 | High | High | 2 | Max gym frequency; Build only for `strength`/`hypertrophy`/`combination` goals |
+
+**Session-to-pattern-family mapping:**
+
+| Session label | Pattern families covered |
+|---|---|
+| `full_body` | Hinge, squat, push, pull, carry/core |
+| `upper` | Push, pull, carry/core |
+| `lower` | Hinge, squat, single-leg |
+| `push` | Horizontal push, vertical push, triceps |
+| `pull` | Horizontal pull, vertical pull, biceps |
+| `legs` | Hinge, squat, single-leg, calf |
+
+**Phase eligibility by `strength_goal`:**
+
+| Split | Base | Build | Peak | Taper | `sport_support` | `hypertrophy` / `strength` / `combination` |
+|---|---|---|---|---|---|---|
+| `full_body_maintenance` | ✓ | ✓ | ✓ | ✓ (only option) | ✓ | ✓ |
+| `upper_only_maintenance` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `full_body` | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ |
+| `upper_lower` | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ |
+| `push_pull_legs` | ✓ | ✓ | Alert | ✗ | Blocking alert | Informational alert |
+| `push_pull_lower_upper` | ✓ | ✓ | Alert | ✗ | Blocking alert | Informational alert |
+
+**Alert behavior in Peak:**
+- `sport_support`: PPL / PPLU are blocked. Athlete must acknowledge the split_phase_conflict alert and the TSB cost before override is permitted.
+- `hypertrophy` / `strength` / `combination`: PPL / PPLU are eligible with an informational TSB projection ("Continuing this split is projected to add X% aerobic fatigue by race day").
+- Taper: all splits hard-blocked except maintenance variants. No override possible.
+
+**Weekly `select_split()` logic:**
+
+```python
+def select_split(
+    rolling_gym_days_4w: float,         # mean gym days over last 4 weeks (float, e.g. 3.5)
+    phase: str,                          # 'onboarding' | 'base' | 'build' | 'peak' | 'taper' | 'deload'
+    strength_goal: str,                  # 'sport_support' | 'hypertrophy' | 'strength' | 'combination'
+    aerobic_days_per_week: int,          # running sessions planned this week
+    preferred_split: str | None,         # user preference from user_profile.preferred_split
+) -> str:
+```
+
+Selection logic (priority order):
+1. If `phase == 'taper'`: return `'full_body_maintenance'` or `'upper_only_maintenance'` (no override).
+2. If `phase == 'deload'`: return `'full_body_maintenance'`.
+3. If `phase == 'onboarding'`: return `'full_body'` (fixed for the 2-week diagnostic phase).
+4. If `preferred_split` is set AND phase-eligible AND aerobic_days constraint is satisfied: return `preferred_split`, set `split_key_overridden = FALSE`.
+5. Else: auto-select based on `rolling_gym_days_4w`:
+   - < 2 → `full_body`
+   - 2–3 → `upper_lower`
+   - 3–4 → `push_pull_legs` (if eligible for phase and strength_goal)
+   - ≥ 4 → `push_pull_lower_upper` (if eligible for phase and strength_goal)
+   - Fall back to next lower split if aerobic_days constraint would be violated.
+
+**Split conflict alert (`split_phase_conflict`):**
+- Fired when: athlete's `preferred_split` is PPL/PPLU during Peak AND `strength_goal == 'sport_support'`.
+- Payload: `{ alert_type: 'split_phase_conflict', tsb_cost: <projected TSB delta at race day>, required_acknowledgment: true }`.
+- TSB cost computed via `project_race_day_tsb(current_tsb, split_key, remaining_peak_weeks)`.
+- If `split_override_acknowledged = TRUE`: override is honored; `split_key_overridden = TRUE`.
+- If not acknowledged: system reverts to `full_body_maintenance`.
+
+**Mid-plan `strength_goal` change:**
+- Re-evaluate all future weeks where `split_key_overridden = FALSE` (algorithm-assigned) using new `strength_goal`.
+- Clear conflict-driven overrides (`split_key_overridden = TRUE AND split_override_acknowledged = TRUE`) that are no longer conflicting under the new goal.
+- Clear `split_phase_conflict` alerts that are no longer triggered.
+- Do not touch weeks where athlete manually overrode the split for non-conflict reasons.
+
+**Schema additions (covered by Story 008 migration):**
+
+```sql
+CREATE TABLE split_catalog (
+    split_key               TEXT PRIMARY KEY,
+    min_days                SMALLINT NOT NULL,
+    max_days                SMALLINT NOT NULL,
+    concurrent_risk         TEXT NOT NULL,
+    volume_freq             TEXT NOT NULL,
+    max_concurrent_aerobic_days SMALLINT NOT NULL
+);
+
+CREATE TABLE split_phase_eligibility (
+    split_key               TEXT REFERENCES split_catalog(split_key),
+    phase                   TEXT NOT NULL,
+    strength_goal           TEXT NOT NULL,
+    eligible                BOOLEAN NOT NULL,
+    requires_alert          BOOLEAN DEFAULT FALSE,
+    alert_type              TEXT,
+    PRIMARY KEY (split_key, phase, strength_goal)
+);
+
+ALTER TABLE training_plan_weeks
+    ADD COLUMN split_key                    TEXT REFERENCES split_catalog(split_key),
+    ADD COLUMN split_key_overridden         BOOLEAN DEFAULT FALSE,
+    ADD COLUMN split_override_acknowledged  BOOLEAN DEFAULT FALSE,
+    ADD COLUMN split_override_tsb_cost      NUMERIC(5,2),
+    ADD COLUMN gym_days_override            SMALLINT;
+
+ALTER TABLE user_profile
+    ADD COLUMN preferred_split  TEXT REFERENCES split_catalog(split_key);
+```
+
+---
+
 ## 15. Race-Free (Open-Ended) Training Mode
 
 When a user has no planned race (`competition_id IS NULL` or no A-priority `competitions` row), the plan runs in `open_ended` mode. The architecture is identical — the session source, TID guardrail, safety gates, and strength blocks are unchanged. What differs is the **phase structure**: there is no peak or taper. The athlete cycles through a perpetual base → build mesocycle until they set a race goal.
@@ -2599,6 +2991,28 @@ def generate_open_ended_plan(
 | Build (rolling) | 75–80% | 5–10% | 15–20% |
 
 Volume ceiling at 80% of tier peak prevents athletes from accumulating race-phase loads without the structured taper that absorbs them. The system flags if CTL approaches the ceiling and the athlete has no race scheduled, recommending they either set a goal race or hold volume.
+
+**Deload insertion — 7 triggers:**
+
+Open-ended plans have no pre-scheduled deload weeks. Deloads are inserted reactively. `training_plans.open_ended_load_week_counter INT DEFAULT 0` tracks loading weeks since last deload; resets to 0 on any deload.
+
+| # | Trigger | Threshold | Notes |
+|---|---------|-----------|-------|
+| 1 | Fixed cadence | Every 5 weeks | Unconditional. Equivalent to 4:1 loading ratio. |
+| 2 | ACWR overreach | ACWR ≥ 1.5 for 3 consecutive days | Deload inserted within next 7 days |
+| 3 | Deep TSB | TSB ≤ −20 for 3 consecutive days | Deload inserted within next 7 days |
+| 4 | Ramp rate sustained | CTL increase > 3 pts/week for 2 consecutive weeks | |
+| 5 | Morning check-in degradation | `overall_feel ≤ 2` for 3 consecutive days | Primary subjective override |
+| 6 | HRV suppression sustained | HRV z < −1.5 for 3 consecutive mornings | Lower threshold than Gate 2 (5 days) — no race to protect |
+| 7 | Sleep deficit cluster | 3-day rolling sleep quality below personal baseline | Existing alert trigger repurposed |
+
+Any reactive deload resets the 5-week counter — no double deload within the same 5-week window.
+
+**Deload week definition for open-ended plans:**
+- Volume reduced 30% from current week
+- Aerobic intensity capped at Z2
+- Strength: `split_key = 'full_body_maintenance'`, no quality sessions
+- Duration: 1 week
 
 ### 15.2 Transitioning to Race-Anchored Mode
 
